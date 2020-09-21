@@ -10,70 +10,347 @@ Replace code below accordingly.  For complete documentation see:
 https://napari.org/docs/plugins/for_plugin_developers.html
 """
 import numpy as np
-from napari_plugin_engine import napari_hook_implementation
+import toolz.curried as tz
+import os
+import dask.array as da
 
+from napari_plugin_engine import napari_hook_implementation
+import zarr
+from tqdm import tqdm
+from skimage import util
+from skimage.transform import pyramid_gaussian
+from collections import defaultdict
+from numcodecs.blosc import Blosc
+import json
+
+DOWNSCALE = 2
+
+BANDTUPS = {
+    True: [('FRE_B4', 'FF0000'), ('FRE_B3', '00FF00'), ('FRE_B2', '0000FF')], #true colour
+    False: [('FRE_B8', 'FF0000'), ('FRE_B4', '00FF00'), ('FRE_B3', '0000FF')], #NIR
+}
 
 @napari_hook_implementation
-def napari_get_reader(path):
-    """A basic implementation of the napari_get_reader hook specification.
+def napari_get_writer(path, layer_types):
+    """Return ome-zarr writer_function if layer_types are all images.
 
     Parameters
     ----------
     path : str or list of str
         Path to file, or list of paths.
+    layer_types: list of str
 
     Returns
     -------
     function or None
         If the path is a recognized format, return a function that accepts the
-        same path or list of paths, and returns a list of layer data tuples.
+        same path and the layer data
     """
-    if isinstance(path, list):
-        # reader plugins may be handed single path, or a list of paths.
-        # if it is a list, it is assumed to be an image stack...
-        # so we are only going to look at the first file.
-        path = path[0]
-
-    # if we know we cannot read the file, we immediately return None.
-    if not path.endswith(".npy"):
+    if all(layer_type in {'image', 'labels'} for layer_type in layer_types):
+        return to_ome_zarr
+    else:
         return None
 
-    # otherwise we return the *function* that can read ``path``.
-    return reader_function
 
+def to_ome_zarr(path, layer_data: List[Tuple[Any, Dict, str]]):
+    """Save layers to ome-zarr format.
 
-def reader_function(path):
-    """Take a path or list of paths and return a list of LayerData tuples.
-
-    Readers are expected to return data as a list of tuples, where each tuple
-    is (data, [add_kwargs, [layer_type]]), "add_kwargs" and "layer_type" are
-    both optional.
-
+    Take path and list of (data, meta, layer_type) and save to ome-zarr format
+    
     Parameters
     ----------
-    path : str or list of str
-        Path to file, or list of paths.
+    path : str
+        Path to save to
 
     Returns
     -------
-    layer_data : list of tuples
-        A list of LayerData tuples where each tuple in the list contains
-        (data, metadata, layer_type), where data is a numpy array, metadata is
-        a dict of keyword arguments for the corresponding viewer.add_* method
-        in napari, and layer_type is a lower-case string naming the type of layer.
-        Both "meta", and "layer_type" are optional. napari will default to
-        layer_type=="image" if not provided
+    paths : list of str or None
+        List of saved filenames if saving was successful, otherwise None
     """
-    # handle both a string and a list of strings
-    paths = [path] if isinstance(path, str) else path
-    # load all files into array
-    arrays = [np.load(_path) for _path in paths]
-    # stack arrays into single array
-    data = np.squeeze(np.stack(arrays))
+    # remove the low resolution quick-look image
+    layer_data = filter(layer_data, lambda dat: dat[1]['name'] != 'QKL_ALL')
+    by_shape = tz.groupby(lambda dat: dat.shape, map(tz.pluck(0), layer_data))
+    if len(by_shape.keys) > 1:
+        basepath, extension = os.path.splitext(path)
+        paths = [basepath + str(shape) + '.' + extension for shape in by_shape]
+    else:
+        paths = [path]
 
-    # optional kwargs for the corresponding viewer.add_* method
-    # https://napari.org/docs/api/napari.components.html#module-napari.components.add_layers_mixin
-    add_kwargs = {}
+    bands = [layer[1]['name'] for layer in layer_data]
+    contrast_histogram = dict(zip(
+        bands,
+        [[] for i in range(len(bands))]
+    ))
+    # images = [layer for layer in layer_data if layer[2] == 'image']
+    # masks = [layer for layer in layer_data if layer[2] == 'labels']
+    
+    for path, (shape, datasets) in zip(paths, by_shape.items()):
+        # only take into account pixels that are in the satellite FOV
+        mask = tz.take(
+            1,
+            (data[0] for data in datasets if data[1]['name'].startswith('EDG')),
+        )
+        # add a spurious z axis because ome-zarr requires it
+        image_layers = [data for data in datasets if data[2] == 'image']
+        out_path = os.makedirs(path, exist_ok=False)
+        out_zarrs = out_path
 
-    layer_type = "image"  # optional, default is "image"
-    return [(data, add_kwargs, layer_type)]
+        # process each timepoint and band
+        for j in tqdm(range(shape[0]), desc=f'writing shape={shape}'):
+            for k, (image, image_meta, _) \
+                    in tqdm(enumerate(image_layers), desc=f'writing bands'):
+                # get downsampled zarr cube for this timepoint and band
+                out_zarrs = band_at_timepoint_to_zarr(
+                    image[j],
+                    k,
+                    out_zarrs=out_zarrs,
+                    num_timepoints=shape[0],
+                    num_bands=len(image_layers),
+                )
+
+                # get frequencies of each pixel for this band and timepoint, masking partial tiles
+                band_at_timepoint_histogram = get_masked_histogram(
+                    image[j], mask
+                )
+                band = image_meta['name']
+                contrast_histogram[band].append(
+                    band_at_timepoint_histogram
+                )
+            num_resolution_levels = len(out_zarrs)
+
+        contrast_limits = {}
+        bands = [image_meta['name'] for _, image_meta, _ in image_layers]
+        for band in bands:
+            lower, upper = get_contrast_limits(contrast_histogram[band])
+            contrast_limits[band] = (lower, upper)
+
+        band_tuples = [
+            (image_meta['name'], image_meta['colormap'])
+            for _, image_meta, _ in image_layers
+        ]
+        zattrs = generate_zattrs(
+            tile=os.path.basename(path),
+            bands=bands,
+            contrast_limits=contrast_limits,
+            max_layer=num_resolution_levels,
+            band_colormap_tup=band_tuples,
+        )
+        write_zattrs(zattrs, out_path)
+
+
+def band_at_timepoint_to_zarr(
+        image,
+        band_number,
+        *,
+        out_zarrs=None,
+        min_level_shape=(1024, 1024),
+        num_timepoints=None,
+        num_bands=None,
+):
+    """Takes the input timepoint filename and band information and writes the data
+    in this image to the appropriate indices in out_zarrs base on the downscale
+    If out_zarrs is a string, this is the first iteration, so the appropriate directories are 
+    instantiated.
+
+    Parameters
+    ----------
+    image: dask ndarray
+        image to save
+    band_number : int
+        number of current band in sequence being processed
+    out_zarrs : string or list, optional
+        string path to where zarrs will be stored if first iteration, otherwise list of partially filled pyramid levels, by default None
+    min_level_shape : tuple of ints, optional
+        shape of smallest desired downscaled level, by default (1024, 1024)
+    num_timepoints : int
+        total number of timepoints that will be processed, by default None
+    num_bands : int
+        total number of bands that will be processed, by default None
+
+    Returns
+    -------
+    list
+        partially (or fully) populated list of numpy arrays where each element is one pyramid level
+    """
+    shape = image.shape
+    dtype = image.dtype
+    max_layer = np.log2(
+        np.max(np.array(shape) / np.array(min_level_shape))
+    ).astype(int)
+    pyramid = pyramid_gaussian(image, max_layer=max_layer, downscale=DOWNSCALE)
+    im_pyramid = list(pyramid)
+    if isinstance(out_zarrs, str):
+        fout_zarr = out_zarrs
+        out_zarrs = []
+        compressor = Blosc(cname='zstd', clevel=9, shuffle=Blosc.SHUFFLE, blocksize=0)
+        for i in range(len(im_pyramid)):
+            r, c = im_pyramid[i].shape
+            out_zarrs.append(zarr.open(
+                    os.path.join(fout_zarr, str(i)), 
+                    mode='a', 
+                    shape=(num_timepoints, num_bands, 1, r, c), 
+                    dtype=np.int16,
+                    chunks=(1, 1, 1, *min_level_shape), 
+                    compressor=compressor,
+                )
+            )
+
+    # for each resolution:
+    for pyramid_level, downscaled in enumerate(im_pyramid):
+        # convert back to int16
+        downscaled = util.img_as_int(downscaled)
+        # store into appropriate zarr
+        out_zarrs[pyramid_level][timepoint_number, band_number, 0, :, :] = downscaled
+    
+    return out_zarrs
+    
+
+def generate_zattrs(
+            tile,
+            bands,
+            *,
+            contrast_limits=None,
+            max_layer=5,
+            band_colormap_tup=RGB_BANDS,
+    ) -> Dict:
+    """Return a zattrs dictionary matching the OME-zarr metadata spec [1]_.
+
+    Parameters
+    ----------
+    tile : str
+        The input tile name, e.g. "55HBU"
+    bands : list of str
+        The bands being written to the zarr.
+    contrast_limits : dict[str -> (int, int)], optional
+        Dictionary mapping bands to contrast limit values.
+    max_layer : int
+        The highest layer in the multiscale pyramid.
+    band_colormap_tup : tuple[(band, hexcolor)]
+        List of band to colormap pairs containing all bands to be initiallydisplayed.
+
+    Returns
+    -------
+    zattr_dict: dict
+        Dictionary of OME-zarr metadata.
+        
+    References
+    ----------
+    .. [1] https://github.com/ome/omero-ms-zarr/blob/master/spec.md
+    """
+    band_colormap = defaultdict(lambda: 'FFFFFF', dict(band_colormap_tup))
+    zattr_dict = {}
+    zattr_dict['multiscales'] = []
+    zattr_dict['multiscales'].append({'datasets' : []})
+    for i in range(max_layer):
+        zattr_dict['multiscales'][0]['datasets'].append(
+            {'path': f'{i}'}
+        )
+    zattr_dict['multiscales'][0]['version'] = '0.1'
+
+    zattr_dict['omero'] = {'channels' : []}
+    for band in bands:
+        color = band_colormap[band]
+        zattr_dict['omero']['channels'].append({
+            'active' : band in dict(band_colormap_tup),
+            'coefficient': 1,
+            'color': color,
+            'family': 'linear',
+            'inverted': 'false',
+            'label': band,
+        })
+        if contrast_limits is not None and band in contrast_limits:
+            lower_contrast_limit, upper_contrast_limit = contrast_limits[band]
+            zattr_dict['omero']['channels'][-1]['window'] = {
+                    'end': int(upper_contrast_limit),
+                    'max': np.iinfo(np.int16).max,
+                    'min': np.iinfo(np.int16).min,
+                    'start': int(lower_contrast_limit),
+            }
+    zattr_dict['omero']['id'] = str(0)
+    zattr_dict['omero']['name'] = tile
+    zattr_dict['omero']['rdefs'] = {
+        'defaultT': 0,  # First timepoint to show the user
+        'defaultZ': 0,  # First Z section to show the user
+        'model': 'color',  # 'color' or 'greyscale'
+    }
+    zattr_dict['omero']['version'] = '0.1'
+    return zattr_dict
+
+
+def write_zattrs(zattr_dict, outdir, *, exist_ok=False):
+    """Write a given zattr_dict to the corresponding directory/file.
+
+    Parameters
+    ----------
+    zattr_dict : dict
+        The zarr attributes dictionary.
+    outdir : str
+        The output zarr directory to which to write.
+    exist_ok : bool, optional
+        If True, any existing files will be overwritten. If False and the
+        file exists, raise a FileExistsError. Note that this check only
+        applies to .zattrs and not to .zgroup.
+    """
+    outfile = os.path.join(outdir, '.zattrs')
+    if not exist_ok and os.path.exists(outfile):
+        raise FileExistsError(
+            f'The file {outfile} exists and `exists_ok` is set to False.'
+        )
+    with open(outfile, "w") as out:
+        json.dump(zattr_dict, out)
+    
+    with open(outdir + "/.zgroup", "w") as outfile:
+        json.dump({"zarr_format": 2}, outfile)
+
+
+def get_masked_histogram(im, mask):
+    """Compute histogram of frequencies of each pixel value in the given image, masked to exclude blank areas 
+    of partially captured tiles
+
+    Parameters
+    ----------
+    im : np.ndarray
+        uint16 image to mask and compute frequencies.
+    mask: np.ndarray
+        int labels where 0 is keep and 1 is discard.
+
+    Returns
+    -------
+    np.ndarray
+        histogram of pixel value frequencies for the masked image
+    """
+    
+    # invert to have 0-discard 1-keep
+    mask_boolean = np.invert(mask.astype("bool"))
+
+    ravelled = im[mask_boolean]
+    masked_histogram = np.histogram(
+            ravelled, bins=np.arange(-2**15 - 0.5, 2**15)
+        )[0]
+    return masked_histogram
+
+
+def get_contrast_limits(band_frequencies):
+    """Compute contrast limits of the given band based on the frequencies of
+    pixel values given. Returns the middle 95th percentile.
+
+    Parameters
+    ----------
+    band_frequencies : list of np.ndarray
+        list of pixel value counts for each timepoint processed for this band
+
+    Returns
+    -------
+    tuple (int, int)
+        lower and upper contrast limits for this histogram based on middle 95th percentile
+    """
+    frequencies = sum(band_frequencies)
+    lower_limit = np.flatnonzero(
+        np.cumsum(frequencies) / np.sum(frequencies) > 0.025
+    )[0]
+    upper_limit = np.flatnonzero(
+        np.cumsum(frequencies) / np.sum(frequencies) > 0.975
+    )[0]
+    lower_limit_rescaled = lower_limit - 2**15
+    upper_limit_rescaled = upper_limit - 2**15
+    return lower_limit_rescaled, upper_limit_rescaled

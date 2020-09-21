@@ -1,2 +1,8 @@
 napari-plugin-engine>=0.1.4
 numpy
+toolz>=0.10
+skimage
+numcodecs
+zarr
+tqdm
+dask
