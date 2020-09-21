@@ -70,8 +70,8 @@ def to_ome_zarr(path, layer_data: List[Tuple[Any, Dict, str]]):
         List of saved filenames if saving was successful, otherwise None
     """
     # remove the low resolution quick-look image
-    layer_data = filter(lambda dat: dat[1]['name'] != 'QKL_ALL', layer_data)
-    by_shape = tz.groupby(lambda dat: dat.shape, tz.pluck(0, layer_data))
+    layer_data = list(filter(lambda dat: dat[1]['name'] != 'QKL_ALL', layer_data))
+    by_shape = tz.groupby(lambda dat: dat[0].shape, layer_data)
     if len(by_shape) > 1:
         basepath, extension = os.path.splitext(path)
         paths = [basepath + str(shape) + '.' + extension for shape in by_shape]
@@ -88,10 +88,7 @@ def to_ome_zarr(path, layer_data: List[Tuple[Any, Dict, str]]):
     
     for path, (shape, datasets) in zip(paths, by_shape.items()):
         # only take into account pixels that are in the satellite FOV
-        mask = tz.take(
-            1,
-            (data[0] for data in datasets if data[1]['name'].startswith('EDG')),
-        )
+        mask = [data[0] for data in datasets if data[1]['name'].startswith('EDG')][0]
         # add a spurious z axis because ome-zarr requires it
         image_layers = [data for data in datasets if data[2] == 'image']
         os.makedirs(path, exist_ok=False)
@@ -105,6 +102,7 @@ def to_ome_zarr(path, layer_data: List[Tuple[Any, Dict, str]]):
                 # get downsampled zarr cube for this timepoint and band
                 out_zarrs = band_at_timepoint_to_zarr(
                     image[j],
+                    j,
                     k,
                     out_zarrs=out_zarrs,
                     num_timepoints=shape[0],
@@ -113,7 +111,7 @@ def to_ome_zarr(path, layer_data: List[Tuple[Any, Dict, str]]):
 
                 # get frequencies of each pixel for this band and timepoint, masking partial tiles
                 band_at_timepoint_histogram = get_masked_histogram(
-                    image[j], mask
+                    image[j], mask[0, :, :]
                 )
                 band = image_meta['name']
                 contrast_histogram[band].append(
@@ -143,6 +141,7 @@ def to_ome_zarr(path, layer_data: List[Tuple[Any, Dict, str]]):
 
 def band_at_timepoint_to_zarr(
         image,
+        timepoint_number,
         band_number,
         *,
         out_zarrs=None,
@@ -159,6 +158,8 @@ def band_at_timepoint_to_zarr(
     ----------
     image: dask ndarray
         image to save
+    timepoint_number: int
+        number of current timepoint in sequence being processed
     band_number : int
         number of current band in sequence being processed
     out_zarrs : string or list, optional
