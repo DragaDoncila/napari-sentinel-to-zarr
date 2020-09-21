@@ -54,7 +54,7 @@ setup(
     ],
     entry_points={
         'napari.plugin': [
-            'sentinel-to-zarr = napari_sentinel_to_zarr',
+            'sentinel_to_zarr = napari_sentinel_to_zarr',
         ],
     },
 )

@@ -9,6 +9,8 @@ see: https://napari.org/docs/plugins/hook_specifications.html
 Replace code below accordingly.  For complete documentation see:
 https://napari.org/docs/plugins/for_plugin_developers.html
 """
+from typing import List, Any, Dict, Tuple
+
 import numpy as np
 import toolz.curried as tz
 import os
@@ -68,9 +70,9 @@ def to_ome_zarr(path, layer_data: List[Tuple[Any, Dict, str]]):
         List of saved filenames if saving was successful, otherwise None
     """
     # remove the low resolution quick-look image
-    layer_data = filter(layer_data, lambda dat: dat[1]['name'] != 'QKL_ALL')
-    by_shape = tz.groupby(lambda dat: dat.shape, map(tz.pluck(0), layer_data))
-    if len(by_shape.keys) > 1:
+    layer_data = filter(lambda dat: dat[1]['name'] != 'QKL_ALL', layer_data)
+    by_shape = tz.groupby(lambda dat: dat.shape, tz.pluck(0, layer_data))
+    if len(by_shape) > 1:
         basepath, extension = os.path.splitext(path)
         paths = [basepath + str(shape) + '.' + extension for shape in by_shape]
     else:
@@ -92,7 +94,8 @@ def to_ome_zarr(path, layer_data: List[Tuple[Any, Dict, str]]):
         )
         # add a spurious z axis because ome-zarr requires it
         image_layers = [data for data in datasets if data[2] == 'image']
-        out_path = os.makedirs(path, exist_ok=False)
+        os.makedirs(path, exist_ok=False)
+        out_path = path
         out_zarrs = out_path
 
         # process each timepoint and band
@@ -136,7 +139,7 @@ def to_ome_zarr(path, layer_data: List[Tuple[Any, Dict, str]]):
             band_colormap_tup=band_tuples,
         )
         write_zattrs(zattrs, out_path)
-
+    return paths
 
 def band_at_timepoint_to_zarr(
         image,
@@ -211,7 +214,7 @@ def generate_zattrs(
             *,
             contrast_limits=None,
             max_layer=5,
-            band_colormap_tup=RGB_BANDS,
+            band_colormap_tup=None,
     ) -> Dict:
     """Return a zattrs dictionary matching the OME-zarr metadata spec [1]_.
 
@@ -226,7 +229,7 @@ def generate_zattrs(
     max_layer : int
         The highest layer in the multiscale pyramid.
     band_colormap_tup : tuple[(band, hexcolor)]
-        List of band to colormap pairs containing all bands to be initiallydisplayed.
+        List of band to colormap pairs containing all bands to be initially displayed.
 
     Returns
     -------
