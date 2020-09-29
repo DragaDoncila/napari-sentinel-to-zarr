@@ -1,12 +1,12 @@
 import numpy as np
-from napari_sentinel_to_zarr.sentinel_to_zarr import to_ome_zarr
+from sentinel_to_zarr.napari_sentinel_to_zarr import to_ome_zarr
 from napari_sentinel_zip.napari_sentinel_zip import reader_function
 
 
 def test_read_write():
-    zipfn = "/media/draga/My Passport/pepsL2A_zip_img/55HBU"
+    zipfn = "/home/draga/Honours/napari-sentinel-to-zarr/sentinel_to_zarr/_tests/Test_Tile"
     data = reader_function(zipfn)
-    outfn = "/media/draga/My Passport/WriterPlugin/55HBU.zarr"
+    outfn = "/home/draga/Honours/Package_Output/Test_Tile.zarr"
     out_paths = to_ome_zarr(outfn, data)
 
 

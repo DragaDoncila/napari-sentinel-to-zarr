@@ -16,8 +16,87 @@ import dask.array as da
 import itertools
 from rechunker import rechunk
 from dask.diagnostics import progress
-from napari_sentinel_to_zarr.sentinel_to_zarr import to_ome_zarr
+from sentinel_to_zarr.napari_sentinel_to_zarr import to_ome_zarr
 from napari_sentinel_zip.napari_sentinel_zip import reader_function
+
+
+def zip_to_zarr(args):
+    data = reader_function(args.root_path)
+    to_ome_zarr(args.out_zarr, data)
+
+def interpolated_to_zarr(args):
+    path_dir = args.root_path
+
+    tilename = os.path.basename(os.path.normpath(path_dir))
+    #TODO: better way to concatenate the paths?
+    fn = path_dir + tilename + "_GapFilled_Image.tif"
+    out_fn = args.out_path + tilename + "_GapFilled_Image.zarr"
+    
+    # write out all channels to single scale zarr
+    processed_im_to_rechunked_zarr(fn, out_fn, args.chunk_size, args.step_size)
+
+def zarr_to_multiscale_zarr(args):
+    print("zarr to multiscale", args)
+    # fn = args.in_zarr 
+    # out_fn = args.out_zarr     
+    # min_level_shape = args.min_shape
+    # im = da.from_zarr(fn)
+
+    # im_shape = im.shape
+    # num_slices = im_shape[0] // NUM_INTERPOLATED_BANDS
+    # x = im_shape[1]
+    # y = im_shape[2]
+    # im = da.reshape(im, (num_slices, NUM_INTERPOLATED_BANDS, x, y))
+    # compressor = Blosc(cname='zstd', clevel=9, shuffle=Blosc.SHUFFLE, blocksize=0)
+    # max_layer = np.log2(
+    #     np.max(np.array(im_shape[1:]) / np.array(min_level_shape))
+    # ).astype(int)
+
+    # contrast_histogram = dict(zip(
+    #     INTERPOLATED_BANDS,
+    #     [[] for i in range(NUM_INTERPOLATED_BANDS)]
+    # ))
+
+    # Path(out_fn).mkdir(parents=True, exist_ok=False)
+    # # open zarr arrays for each resolution shape (num_slices, res, res)
+    # zarrs = []
+    # for i in range(max_layer+1):
+    #     new_res = tuple(np.ceil(np.array(im_shape[1:]) / (DOWNSCALE ** i)).astype(int)) if i != 0 else im_shape[1:]
+    #     outname = out_fn + f"/{i}"
+
+    #     z_arr = zarr.open(
+    #             outname, 
+    #             mode='w', 
+    #             shape=(num_slices, NUM_INTERPOLATED_BANDS, 1, new_res[0], new_res[1]), 
+    #             dtype=im.dtype,
+    #             chunks=(1, 1, 1, im.chunks[1], im.chunks[2]), 
+    #             compressor=compressor
+    #             )
+    #     zarrs.append(z_arr)
+
+    # # for each slice
+    # for i in tqdm(range(num_slices)):
+    #     for j in tqdm(range(NUM_INTERPOLATED_BANDS)):
+    #         im_slice = im[i, j, :, :]
+    #         # get pyramid
+    #         im_pyramid = list(pyramid_gaussian(im_slice, max_layer=max_layer, downscale=DOWNSCALE))
+    #         # for each resolution
+    #         for k, new_im in enumerate(im_pyramid):
+    #             print(k, i, j)
+    #             # conver to uint16
+    #             new_im = skimage.img_as_uint(new_im)
+    #             # store into appropriate zarr at (slice, band, :)
+    #             zarrs[k][i, j, 0, :, :] = new_im
+    #         contrast_histogram[j].append(
+    #             get_histogram(im_pyramid[-1])
+    #         )
+    
+    # contrast_limits = {}
+    # for band in INTERPOLATED_BANDS:
+    #     lower, upper = get_contrast_limits(contrast_histogram[band])
+    #     contrast_limits[band] = (lower, upper)
+
+    # write_zattrs(out_fn, contrast_limits, max_layer, args.tilename)
 
 parser = argparse.ArgumentParser()
 subparsers = parser.add_subparsers()
@@ -102,83 +181,6 @@ def main(argv=sys.argv[1:]):
     args = parser.parse_args(argv)
     args.func(args)
 
-
-def zip_to_zarr(args):
-    data = reader_function(args.root_path)
-    to_ome_zarr(args.out_path, data)
-
-def interpolated_to_zarr(args):
-    path_dir = args.root_path
-
-    tilename = os.path.basename(os.path.normpath(path_dir))
-    #TODO: better way to concatenate the paths?
-    fn = path_dir + tilename + "_GapFilled_Image.tif"
-    out_fn = args.out_path + tilename + "_GapFilled_Image.zarr"
-    
-    # write out all channels to single scale zarr
-    processed_im_to_rechunked_zarr(fn, out_fn, args.chunk_size, args.step_size)
-
-def zarr_to_multiscale_zarr(args):
-    fn = args.in_zarr 
-    out_fn = args.out_zarr     
-    min_level_shape = args.min_shape
-    im = da.from_zarr(fn)
-
-    im_shape = im.shape
-    num_slices = im_shape[0] // NUM_INTERPOLATED_BANDS
-    x = im_shape[1]
-    y = im_shape[2]
-    im = da.reshape(im, (num_slices, NUM_INTERPOLATED_BANDS, x, y))
-    compressor = Blosc(cname='zstd', clevel=9, shuffle=Blosc.SHUFFLE, blocksize=0)
-    max_layer = np.log2(
-        np.max(np.array(im_shape[1:]) / np.array(min_level_shape))
-    ).astype(int)
-
-    contrast_histogram = dict(zip(
-        INTERPOLATED_BANDS,
-        [[] for i in range(NUM_INTERPOLATED_BANDS)]
-    ))
-
-    Path(out_fn).mkdir(parents=True, exist_ok=False)
-    # open zarr arrays for each resolution shape (num_slices, res, res)
-    zarrs = []
-    for i in range(max_layer+1):
-        new_res = tuple(np.ceil(np.array(im_shape[1:]) / (DOWNSCALE ** i)).astype(int)) if i != 0 else im_shape[1:]
-        outname = out_fn + f"/{i}"
-
-        z_arr = zarr.open(
-                outname, 
-                mode='w', 
-                shape=(num_slices, NUM_INTERPOLATED_BANDS, 1, new_res[0], new_res[1]), 
-                dtype=im.dtype,
-                chunks=(1, 1, 1, im.chunks[1], im.chunks[2]), 
-                compressor=compressor
-                )
-        zarrs.append(z_arr)
-
-    # for each slice
-    for i in tqdm(range(num_slices)):
-        for j in tqdm(range(NUM_INTERPOLATED_BANDS)):
-            im_slice = im[i, j, :, :]
-            # get pyramid
-            im_pyramid = list(pyramid_gaussian(im_slice, max_layer=max_layer, downscale=DOWNSCALE))
-            # for each resolution
-            for k, new_im in enumerate(im_pyramid):
-                print(k, i, j)
-                # conver to uint16
-                new_im = skimage.img_as_uint(new_im)
-                # store into appropriate zarr at (slice, band, :)
-                zarrs[k][i, j, 0, :, :] = new_im
-            contrast_histogram[j].append(
-                get_histogram(im_pyramid[-1])
-            )
-    
-    contrast_limits = {}
-    for band in INTERPOLATED_BANDS:
-        lower, upper = get_contrast_limits(contrast_histogram[band])
-        contrast_limits[band] = (lower, upper)
-
-    write_zattrs(out_fn, contrast_limits, max_layer, args.tilename)
 
 def processed_im_to_rechunked_zarr(filename, outname, chunk_size, step_size):
     tiff_f = tifffile.TiffFile(filename)

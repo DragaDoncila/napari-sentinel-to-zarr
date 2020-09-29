@@ -26,6 +26,11 @@ from numcodecs.blosc import Blosc
 import json
 
 DOWNSCALE = 2
+COLORMAP_HEX_COLOR_DICT = {
+    'red': 'FF0000',
+    'blue': '0000FF',
+    'green': '00FF00'
+}
 
 @napari_hook_implementation
 def napari_get_writer(path, layer_types):
@@ -81,7 +86,7 @@ def to_ome_zarr(path, layer_data: List[Tuple[Any, Dict, str]]):
 
     for path, (shape, datasets) in zip(paths, by_shape.items()):
         # only take into account pixels that are in the satellite FOV
-        mask = [data[0] for data in datasets if data[1]['name'].startswith('EDG')][0]
+        mask = [np.asarray(data[0]) for data in datasets if data[1]['name'].startswith('EDG')][0]
         # add a spurious z axis because ome-zarr requires it
         image_layers = [data for data in datasets if data[2] == 'image']
         os.makedirs(path, exist_ok=False)
@@ -93,8 +98,9 @@ def to_ome_zarr(path, layer_data: List[Tuple[Any, Dict, str]]):
             for k, (image, image_meta, _) \
                     in tqdm(enumerate(image_layers), desc=f'writing bands'):
                 # get downsampled zarr cube for this timepoint and band
+                imagej = np.asarray(image[j])
                 out_zarrs = band_at_timepoint_to_zarr(
-                    image[j],
+                    imagej,
                     j,
                     k,
                     out_zarrs=out_zarrs,
@@ -104,7 +110,7 @@ def to_ome_zarr(path, layer_data: List[Tuple[Any, Dict, str]]):
 
                 # get frequencies of each pixel for this band and timepoint, masking partial tiles
                 band_at_timepoint_histogram = get_masked_histogram(
-                    image[j], mask[0, :, :]
+                    imagej, mask[0, :, :]
                 )
                 band = image_meta['name']
                 contrast_histogram[band].append(
@@ -116,11 +122,14 @@ def to_ome_zarr(path, layer_data: List[Tuple[Any, Dict, str]]):
         bands = [image_meta['name'] for _, image_meta, _ in image_layers]
         for band in bands:
             lower, upper = get_contrast_limits(contrast_histogram[band])
+            if upper - lower == 0:
+                upper += 1 if upper >= 0 else -1
             contrast_limits[band] = (lower, upper)
 
         band_tuples = [
-            (image_meta['name'], image_meta['colormap'])
-            for _, image_meta, _ in image_layers
+            (image_meta['name'], COLORMAP_HEX_COLOR_DICT[image_meta['colormap']])
+            for _, image_meta, _ in image_layers if
+            image_meta['name'] in ['SRE_B2', 'SRE_B3', 'SRE_B4']
         ]
         zattrs = generate_zattrs(
             tile=os.path.basename(path),
@@ -248,12 +257,13 @@ def generate_zattrs(
     for band in bands:
         color = band_colormap[band]
         zattr_dict['omero']['channels'].append({
-            'active' : band in dict(band_colormap_tup),
+            'active' : band in ['SRE_B2', 'SRE_B3', 'SRE_B4'],
             'coefficient': 1,
             'color': color,
             'family': 'linear',
             'inverted': 'false',
             'label': band,
+            'name': band
         })
         if contrast_limits is not None and band in contrast_limits:
             lower_contrast_limit, upper_contrast_limit = contrast_limits[band]
