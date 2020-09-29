@@ -54,10 +54,10 @@ setup(
     ],
     entry_points={
         'napari.plugin': [
-            'sentinel_to_zarr = napari_sentinel_to_zarr',
+            'napari_sentinel_to_zarr = napari_sentinel_to_zarr',
         ],
         'console_scripts': [
-            'processed-to-zarr = processed_to_zarr:main'
+            'sentinel_to_zarr = sentinel_to_zarr:main'
         ]
     },
 )
