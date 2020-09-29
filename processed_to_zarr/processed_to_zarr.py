@@ -43,7 +43,7 @@ parser.add_argument(
 )
 parser.add_argument(
     '--chunk_size',
-    default=2048,
+    default=1024,
     help='Chunk size of output zarr files.',
     dest='chunk_size'
 )
@@ -70,28 +70,22 @@ def main(argv=sys.argv[1:]):
     out_fn = args.out_path + tilename + "_GapFilled_Image.zarr"
     
     # write out all channels to single scale zarr
-    # processed_im_to_zarr(fn, out_fn, args.chunk_size, args.step_size)
-    
-    #rechunk into time-slices of (1, chunk_size, chunk_size)
-    chunk_out_dir = args.out_path + tilename
-    rechunk_zarr(out_fn, chunk_out_dir, args.chunk_size)
-    
+    processed_im_to_rechunked_zarr(fn, out_fn, args.chunk_size, args.step_size)
+        
     # process into multiscale and reshape to pull out channels
     #TODO: could we delete as we go somehow to save room?
-    # multiscale_fn = args.out_path + tilename + "_Multiscale_GapFilled_Image.zarr"
+    multiscale_fn = args.out_path + tilename + "_Multiscale_GapFilled_Image.zarr"
     
-    # max_layer, contrast_histogram = zarr_to_multiscale_zarr(out_fn, multiscale_fn, args.min_shape, args.chunk_size)
-    # # compute contrast limits and write zattrs
-    # contrast_limits = {}
-    # for band in CHANNELS:
-    #     lower, upper = get_contrast_limits(contrast_histogram[band])
-    #     contrast_limits[band] = (lower, upper)
+    max_layer, contrast_histogram = zarr_to_multiscale_zarr(out_fn, multiscale_fn, args.min_shape, args.chunk_size)
+    # compute contrast limits and write zattrs
+    contrast_limits = {}
+    for band in CHANNELS:
+        lower, upper = get_contrast_limits(contrast_histogram[band])
+        contrast_limits[band] = (lower, upper)
 
-    # write_zattrs(multiscale_fn, contrast_limits, max_layer, tilename)
+    write_zattrs(multiscale_fn, contrast_limits, max_layer, tilename)
 
-
-
-def processed_im_to_zarr(filename, outname, chunk_size, step_size):
+def processed_im_to_rechunked_zarr(filename, outname, chunk_size, step_size):
     tiff_f = tifffile.TiffFile(filename)
     d_mmap = tiff_f.pages[0].asarray(out='memmap')
     tiff_f.close()
@@ -104,26 +98,25 @@ def processed_im_to_zarr(filename, outname, chunk_size, step_size):
                 mode='w', 
                 shape=d_transposed.shape, 
                 dtype=d_transposed.dtype,
-                chunks=(d_transposed.shape[0], 1, 1000), 
+                chunks=(1, chunk_size, chunk_size), 
                 compressor=compressor
                 )
 
-    for i in tqdm(range(d_transposed.shape[1])):
-        z_arr[:, i, :] = d_transposed[:, i, :]
+    start = 0
+    end = 0
+    num_chunks = z_arr.shape[0] // step_size
 
+    for i in tqdm(range(0, num_chunks)):
+        start = i * step_size
+        end = start + step_size
+        current_slice = np.copy(d_transposed[start:end, :, :])
+        z_arr[start:end, :, :] = current_slice
+        del(current_slice)
 
-def rechunk_zarr(in_fn, out_dir, chunk_size):
-    source = da.from_zarr(in_fn)
-    intermediate = out_dir + "_intermediate.zarr"
-    target = out_dir + "_Rechunked_GapFilled_Image.zarr"
-    rechunked = rechunk(
-        source, 
-        target_chunks=(1, chunk_size, chunk_size), 
-        target_store=target,
-        max_mem="8GB",
-        temp_store=intermediate)
-    with progress.ProgressBar():
-        rechunked.execute()
+    print("Copying remainder...")
+    if z_arr.shape[0] % step_size != 0:
+        final_slice = np.copy(d_transposed[end:, :, :])
+        z_arr[end:, :, :] = final_slice
 
 
 def zarr_to_multiscale_zarr(fn, out_fn, min_level_shape, chunk_size):
@@ -136,7 +129,7 @@ def zarr_to_multiscale_zarr(fn, out_fn, min_level_shape, chunk_size):
     im = da.reshape(im, (num_slices, TOTAL_CHANNELS, x, y))
     compressor = Blosc(cname='zstd', clevel=9, shuffle=Blosc.SHUFFLE, blocksize=0)
     max_layer = np.log2(
-        np.max(np.array(im_shape) / np.array(min_level_shape))
+        np.max(np.array(im_shape[1:]) / np.array(min_level_shape))
     ).astype(int)
 
     contrast_histogram = dict(zip(
@@ -272,5 +265,41 @@ def write_zattrs(out_fn, contrast_limits, max_layer, tilename):
 
     with open(out_fn + "/.zgroup", "w") as outfile:
         json.dump({"zarr_format": 2}, outfile)
+
+
+def processed_im_to_zarr(filename, outname, chunk_size, step_size):
+    tiff_f = tifffile.TiffFile(filename)
+    d_mmap = tiff_f.pages[0].asarray(out='memmap')
+    tiff_f.close()
+    d_transposed = d_mmap.transpose((2, 0, 1))
+
+    compressor = Blosc(cname='zstd', clevel=9, shuffle=Blosc.SHUFFLE, blocksize=0)
+
+    z_arr = zarr.open(
+                outname, 
+                mode='w', 
+                shape=d_transposed.shape, 
+                dtype=d_transposed.dtype,
+                chunks=(d_transposed.shape[0], 1, 1000), 
+                compressor=compressor
+                )
+
+    for i in tqdm(range(d_transposed.shape[1])):
+        z_arr[:, i, :] = d_transposed[:, i, :]
+
+
+def rechunk_zarr(in_fn, out_dir, chunk_size):
+    source = da.from_zarr(in_fn)
+    intermediate = out_dir + "_intermediate.zarr"
+    target = out_dir + "_Rechunked_GapFilled_Image.zarr"
+    rechunked = rechunk(
+        source, 
+        target_chunks=(1, chunk_size, chunk_size), 
+        target_store=target,
+        max_mem="8GB",
+        temp_store=intermediate)
+    print(rechunked)
+    with progress.ProgressBar():
+        rechunked.execute()
 
 
