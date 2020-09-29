@@ -71,6 +71,7 @@ def to_ome_zarr(path, layer_data: List[Tuple[Any, Dict, str]]):
     """
     # remove the low resolution quick-look image
     layer_data = list(filter(lambda dat: dat[1]['name'] != 'QKL_ALL', layer_data))
+    # TODO: because masks are in there we still get two shapes even if no low res bands were selected
     by_shape = tz.groupby(lambda dat: dat[0].shape, layer_data)
     if len(by_shape) > 1:
         basepath, extension = os.path.splitext(path)
@@ -86,7 +87,7 @@ def to_ome_zarr(path, layer_data: List[Tuple[Any, Dict, str]]):
 
     for path, (shape, datasets) in zip(paths, by_shape.items()):
         # only take into account pixels that are in the satellite FOV
-        mask = [np.asarray(data[0]) for data in datasets if data[1]['name'].startswith('EDG')][0]
+        mask = [data[0] for data in datasets if data[1]['name'].startswith('EDG')][0]
         # add a spurious z axis because ome-zarr requires it
         image_layers = [data for data in datasets if data[2] == 'image']
         os.makedirs(path, exist_ok=False)
@@ -110,7 +111,7 @@ def to_ome_zarr(path, layer_data: List[Tuple[Any, Dict, str]]):
 
                 # get frequencies of each pixel for this band and timepoint, masking partial tiles
                 band_at_timepoint_histogram = get_masked_histogram(
-                    imagej, mask[0, :, :]
+                    imagej, np.asarray(mask[0, :, :])
                 )
                 band = image_meta['name']
                 contrast_histogram[band].append(
@@ -129,7 +130,7 @@ def to_ome_zarr(path, layer_data: List[Tuple[Any, Dict, str]]):
         band_tuples = [
             (image_meta['name'], COLORMAP_HEX_COLOR_DICT[image_meta['colormap']])
             for _, image_meta, _ in image_layers if
-            image_meta['name'] in ['SRE_B2', 'SRE_B3', 'SRE_B4']
+            image_meta['name'] in ['FRE_B2', 'FRE_B3', 'FRE_B4']
         ]
         zattrs = generate_zattrs(
             tile=os.path.basename(path),

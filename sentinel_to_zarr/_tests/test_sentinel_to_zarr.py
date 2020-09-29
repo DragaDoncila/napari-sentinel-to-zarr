@@ -4,9 +4,9 @@ from napari_sentinel_zip.napari_sentinel_zip import reader_function
 
 
 def test_read_write():
-    zipfn = "/home/draga/Honours/napari-sentinel-to-zarr/sentinel_to_zarr/_tests/Test_Tile"
+    zipfn = "/media/draga/My Passport/pepsL2A_zip_img/55HBV/"
     data = reader_function(zipfn)
-    outfn = "/home/draga/Honours/Package_Output/Test_Tile.zarr"
+    outfn = "/media/draga/Elements/55HBV_Raw.zarr"
     out_paths = to_ome_zarr(outfn, data)
 
 

@@ -22,18 +22,15 @@ from napari_sentinel_zip.napari_sentinel_zip import reader_function
 
 def zip_to_zarr(args):
     data = reader_function(args.root_path)
+    data = [layer_data for layer_data in data if layer_data[1]['name'] in args.selected_bands or layer_data[1]['name'].startswith('EDG')]
     to_ome_zarr(args.out_zarr, data)
 
 def interpolated_to_zarr(args):
-    path_dir = args.root_path
-
-    tilename = os.path.basename(os.path.normpath(path_dir))
-    #TODO: better way to concatenate the paths?
-    fn = path_dir + tilename + "_GapFilled_Image.tif"
-    out_fn = args.out_path + tilename + "_GapFilled_Image.zarr"
+    fn = args.in_tif
+    out_fn = args.out_zarr
     
     # write out all channels to single scale zarr
-    processed_im_to_rechunked_zarr(fn, out_fn, args.chunk_size, args.step_size)
+    processed_im_to_rechunked_zarr(fn, out_fn, args.chunk_size, args.step_size, args.selected_bands)
 
 def zarr_to_multiscale_zarr(args):
     print("zarr to multiscale", args)
@@ -110,18 +107,25 @@ parser_zip_to_zarr.add_argument(
     'out_zarr',
     help='Path to output zarr file e.g. ~/55HBU.zarr'
 )
+parser_zip_to_zarr.add_argument(
+    '--bands',
+    help='The bands to process.',
+    type=lambda string: string.split(','),
+    default= ['FRE_B2', 'FRE_B3', 'FRE_B4', 'FRE_B8'],
+    dest='selected_bands'
+)
 parser_zip_to_zarr.set_defaults(
     func=zip_to_zarr
 )
 
 parser_interpolated_to_zarr = subparsers.add_parser('interpolated-to-zarr')
 parser_interpolated_to_zarr.add_argument(
-    'root_path',
-    help='The root path containing interpolated image and mask for one tile.',
+    'in_tif',
+    help='The path to interpolated Sentinel tif for one tile',
 )
 parser_interpolated_to_zarr.add_argument(
-    'out_dir',
-    help='Path to output directory for zarr file'
+    'out_zarr',
+    help='Path to output zarr file e.g. ~/55HBU_GapFilled_Image.zarr'
 )
 parser_interpolated_to_zarr.add_argument(
     '--chunk_size',
@@ -135,22 +139,29 @@ parser_interpolated_to_zarr.add_argument(
     help='Number of 10980*10980 slices to convert at once.',
     dest='step_size'
 )
+parser_interpolated_to_zarr.add_argument(
+    '--bands',
+    help='The bands to process.',
+    type=lambda string: string.split(','),
+    default= ['FRE_B2', 'FRE_B3', 'FRE_B4', 'FRE_B8'],
+    dest='selected_bands'
+)
 parser_interpolated_to_zarr.set_defaults(
     func=interpolated_to_zarr
 )
 
-INTERPOLATED_BANDS = [
-    "B2",
-    "B3",
-    "B4",
-    "B5",
-    "B6",
-    "B7",
-    "B8",
-    "B8A",
-    "B11",
-    "B12"
-]
+INTERPOLATED_BANDS = {
+    "FRE_B2": 0,
+    "FRE_B3": 1,
+    "FRE_B4": 2,
+    "FRE_B5": 3,
+    "FRE_B6": 4,
+    "FRE_B7": 5,
+    "FRE_B8": 6,
+    "FRE_B8A": 7,
+    "FRE_B11": 8,
+    "FRE_B12" : 9
+}
 NUM_INTERPOLATED_BANDS = 10
 DOWNSCALE = 2
 parser_zarr_to_multiscale = subparsers.add_parser('zarr-to-multiscale-zarr')
@@ -182,7 +193,7 @@ def main(argv=sys.argv[1:]):
     args.func(args)
 
 
-def processed_im_to_rechunked_zarr(filename, outname, chunk_size, step_size):
+def processed_im_to_rechunked_zarr(filename, outname, chunk_size, step_size, selected_bands):
     tiff_f = tifffile.TiffFile(filename)
     d_mmap = tiff_f.pages[0].asarray(out='memmap')
     tiff_f.close()
@@ -190,10 +201,15 @@ def processed_im_to_rechunked_zarr(filename, outname, chunk_size, step_size):
 
     compressor = Blosc(cname='zstd', clevel=9, shuffle=Blosc.SHUFFLE, blocksize=0)
 
+    num_timepoints = d_transposed.shape[0] // 10
+    num_selected_slices = (num_timepoints) * len(selected_bands)
+    selected_band_indices = [INTERPOLATED_BANDS[band] for band in selected_bands]
+    selected_band_indices = list(itertools.chain.from_iterable([[i*10 + idx for idx in selected_band_indices] for i in range(num_timepoints)]))
+
     z_arr = zarr.open(
                 outname, 
                 mode='w', 
-                shape=d_transposed.shape, 
+                shape=(num_selected_slices, d_transposed.shape[1], d_transposed.shape[2]), 
                 dtype=d_transposed.dtype,
                 chunks=(1, chunk_size, chunk_size), 
                 compressor=compressor
@@ -201,19 +217,25 @@ def processed_im_to_rechunked_zarr(filename, outname, chunk_size, step_size):
 
     start = 0
     end = 0
-    num_chunks = z_arr.shape[0] // step_size
-
+    num_chunks = num_selected_slices // step_size
+    start_zarr = 0
+    end_zarr = 0
     for i in tqdm(range(0, num_chunks)):
         start = i * step_size
         end = start + step_size
-        current_slice = np.copy(d_transposed[start:end, :, :])
-        z_arr[start:end, :, :] = current_slice
+        current_slice_indices = selected_band_indices[start:end]
+
+        current_slice = np.copy(d_transposed[current_slice_indices, :, :])
+        end_zarr += len(current_slice)
+        z_arr[start_zarr:end_zarr, :, :] = current_slice
+        start_zarr = end_zarr
         del(current_slice)
 
     print("Copying remainder...")
-    if z_arr.shape[0] % step_size != 0:
-        final_slice = np.copy(d_transposed[end:, :, :])
-        z_arr[end:, :, :] = final_slice
+    if num_selected_slices % step_size != 0:
+        final_slice_indices = selected_band_indices[end:]
+        final_slice = np.copy(d_transposed[current_slice_indices, :, :])
+        z_arr[end_zarr:, :, :] = final_slice
 
 
 def get_contrast_limits(band_frequencies):
