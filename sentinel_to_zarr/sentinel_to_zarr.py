@@ -23,7 +23,6 @@ from collections import defaultdict
 
 def zip_to_zarr(args):
     data = reader_function(args.root_path)
-    data = [layer_data for layer_data in data if layer_data[1]['name'] in args.selected_bands or layer_data[1]['name'].startswith('EDG')]
     to_ome_zarr(args.out_zarr, data)
 
 def interpolated_to_zarr(args):

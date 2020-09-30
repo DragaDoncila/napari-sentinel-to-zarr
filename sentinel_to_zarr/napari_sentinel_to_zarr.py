@@ -258,7 +258,7 @@ def generate_zattrs(
     for band in bands:
         color = band_colormap[band]
         zattr_dict['omero']['channels'].append({
-            'active' : band in ['SRE_B2', 'SRE_B3', 'SRE_B4'],
+            'active' : band in ['FRE_B2', 'FRE_B3', 'FRE_B4'],
             'coefficient': 1,
             'color': color,
             'family': 'linear',
