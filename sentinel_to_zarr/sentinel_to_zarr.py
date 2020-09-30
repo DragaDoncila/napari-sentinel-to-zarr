@@ -34,66 +34,68 @@ def interpolated_to_zarr(args):
 
 def zarr_to_multiscale_zarr(args):
     print("zarr to multiscale", args)
-    # fn = args.in_zarr 
-    # out_fn = args.out_zarr     
-    # min_level_shape = args.min_shape
-    # im = da.from_zarr(fn)
+    fn = args.in_zarr 
+    out_fn = args.out_zarr     
+    min_level_shape = args.min_shape
+    bands = open(fn + "/bands.txt", 'r').readline().split(',')
 
-    # im_shape = im.shape
-    # num_slices = im_shape[0] // NUM_INTERPOLATED_BANDS
-    # x = im_shape[1]
-    # y = im_shape[2]
-    # im = da.reshape(im, (num_slices, NUM_INTERPOLATED_BANDS, x, y))
-    # compressor = Blosc(cname='zstd', clevel=9, shuffle=Blosc.SHUFFLE, blocksize=0)
-    # max_layer = np.log2(
-    #     np.max(np.array(im_shape[1:]) / np.array(min_level_shape))
-    # ).astype(int)
+    im = da.from_zarr(fn)
 
-    # contrast_histogram = dict(zip(
-    #     INTERPOLATED_BANDS,
-    #     [[] for i in range(NUM_INTERPOLATED_BANDS)]
-    # ))
+    im_shape = im.shape
+    num_slices = im_shape[0] // NUM_INTERPOLATED_BANDS
+    x = im_shape[1]
+    y = im_shape[2]
+    im = da.reshape(im, (num_slices, NUM_INTERPOLATED_BANDS, x, y))
+    compressor = Blosc(cname='zstd', clevel=9, shuffle=Blosc.SHUFFLE, blocksize=0)
+    max_layer = np.log2(
+        np.max(np.array(im_shape[1:]) / np.array(min_level_shape))
+    ).astype(int)
 
-    # Path(out_fn).mkdir(parents=True, exist_ok=False)
-    # # open zarr arrays for each resolution shape (num_slices, res, res)
-    # zarrs = []
-    # for i in range(max_layer+1):
-    #     new_res = tuple(np.ceil(np.array(im_shape[1:]) / (DOWNSCALE ** i)).astype(int)) if i != 0 else im_shape[1:]
-    #     outname = out_fn + f"/{i}"
+    contrast_histogram = dict(zip(
+        bands,
+        [[] for i in range(len(bands))]
+    ))
 
-    #     z_arr = zarr.open(
-    #             outname, 
-    #             mode='w', 
-    #             shape=(num_slices, NUM_INTERPOLATED_BANDS, 1, new_res[0], new_res[1]), 
-    #             dtype=im.dtype,
-    #             chunks=(1, 1, 1, im.chunks[1], im.chunks[2]), 
-    #             compressor=compressor
-    #             )
-    #     zarrs.append(z_arr)
+    Path(out_fn).mkdir(parents=True, exist_ok=False)
+    # open zarr arrays for each resolution shape (num_slices, res, res)
+    zarrs = []
+    for i in range(max_layer+1):
+        new_res = tuple(np.ceil(np.array(im_shape[1:]) / (DOWNSCALE ** i)).astype(int)) if i != 0 else im_shape[1:]
+        outname = out_fn + f"/{i}"
 
-    # # for each slice
-    # for i in tqdm(range(num_slices)):
-    #     for j in tqdm(range(NUM_INTERPOLATED_BANDS)):
-    #         im_slice = im[i, j, :, :]
-    #         # get pyramid
-    #         im_pyramid = list(pyramid_gaussian(im_slice, max_layer=max_layer, downscale=DOWNSCALE))
-    #         # for each resolution
-    #         for k, new_im in enumerate(im_pyramid):
-    #             print(k, i, j)
-    #             # conver to uint16
-    #             new_im = skimage.img_as_uint(new_im)
-    #             # store into appropriate zarr at (slice, band, :)
-    #             zarrs[k][i, j, 0, :, :] = new_im
-    #         contrast_histogram[j].append(
-    #             get_histogram(im_pyramid[-1])
-    #         )
+        z_arr = zarr.open(
+                outname, 
+                mode='w', 
+                shape=(num_slices, NUM_INTERPOLATED_BANDS, 1, new_res[0], new_res[1]), 
+                dtype=im.dtype,
+                chunks=(1, 1, 1, im.chunks[1], im.chunks[2]), 
+                compressor=compressor
+                )
+        zarrs.append(z_arr)
+
+    # for each slice
+    for i in tqdm(range(num_slices)):
+        for j in tqdm(range(len(bands))):
+            im_slice = im[i, j, :, :]
+            # get pyramid
+            im_pyramid = list(pyramid_gaussian(im_slice, max_layer=max_layer, downscale=DOWNSCALE))
+            # for each resolution
+            for k, new_im in enumerate(im_pyramid):
+                print(k, i, j)
+                # conver to uint16
+                new_im = skimage.img_as_uint(new_im)
+                # store into appropriate zarr at (slice, band, :)
+                zarrs[k][i, j, 0, :, :] = new_im
+            contrast_histogram[j].append(
+                get_histogram(im_pyramid[-1])
+            )
     
-    # contrast_limits = {}
-    # for band in INTERPOLATED_BANDS:
-    #     lower, upper = get_contrast_limits(contrast_histogram[band])
-    #     contrast_limits[band] = (lower, upper)
+    contrast_limits = {}
+    for band in bands:
+        lower, upper = get_contrast_limits(contrast_histogram[band])
+        contrast_limits[band] = (lower, upper)
 
-    # write_zattrs(out_fn, contrast_limits, max_layer, args.tilename)
+    write_zattrs(out_fn, contrast_limits, max_layer, args.tilename, bands)
 
 parser = argparse.ArgumentParser()
 subparsers = parser.add_subparsers()
@@ -150,18 +152,22 @@ parser_interpolated_to_zarr.set_defaults(
     func=interpolated_to_zarr
 )
 
-INTERPOLATED_BANDS = {
-    "FRE_B2": 0,
-    "FRE_B3": 1,
-    "FRE_B4": 2,
-    "FRE_B5": 3,
-    "FRE_B6": 4,
-    "FRE_B7": 5,
-    "FRE_B8": 6,
-    "FRE_B8A": 7,
-    "FRE_B11": 8,
-    "FRE_B12" : 9
-}
+INTERPOLATED_BANDS_LIST = [
+    "FRE_B2",
+    "FRE_B3",
+    "FRE_B4",
+    "FRE_B5",
+    "FRE_B6",
+    "FRE_B7",
+    "FRE_B8",
+    "FRE_B8A",
+    "FRE_B11",
+    "FRE_B12" 
+]
+INTERPOLATED_BAND_INDICES = list(range(10))
+INTERPOLATED_BANDS_TO_INDICES = dict(zip(INTERPOLATED_BANDS_LIST, INTERPOLATED_BAND_INDICES))
+INTERPOLATED_INDICES_TO_BANDS = dict(zip(INTERPOLATED_BAND_INDICES, INTERPOLATED_BANDS_LIST))
+
 NUM_INTERPOLATED_BANDS = 10
 DOWNSCALE = 2
 parser_zarr_to_multiscale = subparsers.add_parser('zarr-to-multiscale-zarr')
@@ -203,8 +209,15 @@ def processed_im_to_rechunked_zarr(filename, outname, chunk_size, step_size, sel
 
     num_timepoints = d_transposed.shape[0] // 10
     num_selected_slices = (num_timepoints) * len(selected_bands)
-    selected_band_indices = [INTERPOLATED_BANDS[band] for band in selected_bands]
+    selected_band_indices = sorted([INTERPOLATED_BANDS_TO_INDICES[band] for band in selected_bands])
+    out_bands = [INTERPOLATED_INDICES_TO_BANDS[idx] for idx in selected_band_indices]
+    with open(outname + "/bands.txt", 'w') as band_file:
+        for band in out_bands:
+            band_file.write(band + ", ")
+
+    
     selected_band_indices = list(itertools.chain.from_iterable([[i*10 + idx for idx in selected_band_indices] for i in range(num_timepoints)]))
+
 
     z_arr = zarr.open(
                 outname, 
@@ -262,7 +275,7 @@ def get_contrast_limits(band_frequencies):
     return lower_limit_rescaled, upper_limit_rescaled
 
 
-def write_zattrs(out_fn, contrast_limits, max_layer, tilename):
+def write_zattrs(out_fn, contrast_limits, max_layer, tilename, bands):
     # write zattr file with contrast limits and remaining attributes
     zattr_dict = {}
     zattr_dict["multiscales"] = []
@@ -274,7 +287,7 @@ def write_zattrs(out_fn, contrast_limits, max_layer, tilename):
     zattr_dict["multiscales"][0]["version"] = "0.1"
 
     zattr_dict["omero"] = {"channels" : []}
-    for band in INTERPOLATED_BANDS:
+    for band in bands:
         zattr_dict["omero"]["channels"].append(
             {
                 # TODO: write proper colors and active channels here
