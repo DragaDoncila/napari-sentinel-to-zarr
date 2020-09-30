@@ -14,30 +14,196 @@ from skimage.transform import pyramid_gaussian
 from pathlib import Path
 import dask.array as da
 import itertools
-from rechunker import rechunk
-from dask.diagnostics import progress
 from sentinel_to_zarr.napari_sentinel_to_zarr import to_ome_zarr
 from napari_sentinel_zip.napari_sentinel_zip import reader_function
 from collections import defaultdict
 
+INTERPOLATED_BANDS_LIST = [
+    "FRE_B2",
+    "FRE_B3",
+    "FRE_B4",
+    "FRE_B5",
+    "FRE_B6",
+    "FRE_B7",
+    "FRE_B8",
+    "FRE_B8A",
+    "FRE_B11",
+    "FRE_B12" 
+]
+
+DOWNSCALE = 2
+BAND_HEX_COLOR_DICT = {
+    'FRE_B2': 'FF0000',
+    'FRE_B3': '0000FF',
+    'FRE_B4': '00FF00'
+}
+
 
 def zip_to_zarr(args):
+    """Save raw, zipped Sentinel tiffs to multiscale OME-zarr
+
+    Parameters
+    ----------
+    args : argparse Namespace
+        expecting path to directory of Sentinel zips and path to output zarr
+    """
     data = reader_function(args.root_path)
     to_ome_zarr(args.out_zarr, data)
 
+
 def interpolated_to_zarr(args):
+    """Write interpolated Sentinel image to zarr, transposing axes to time oriented
+
+    Parameters
+    ----------
+    args : argparse Namespace
+        Expecting input tiff path and output zarr attributes
+    """
     fn = args.in_tif
     out_fn = args.out_zarr
     
-    # write out all channels to single scale zarr
     processed_im_to_rechunked_zarr(fn, out_fn, args.chunk_size, args.step_size)
 
+
 def zarr_to_multiscale_zarr(args):
+    """Write input zarr to multiscale OME-zarr with separate channel axis
+
+    Parameters
+    ----------
+    args : argparse Namespace
+        Expecting input zarr path and output zarr attributes
+    """
     fn = args.in_zarr 
     out_fn = args.out_zarr     
     min_level_shape = (args.min_shape, args.min_shape)
     bands = INTERPOLATED_BANDS_LIST
 
+    write_multiscale_zarr(fn, out_fn, min_level_shape, bands, args.tilename)
+
+parser = argparse.ArgumentParser()
+subparsers = parser.add_subparsers()
+
+parser_zip_to_zarr = subparsers.add_parser('zip-to-zarr')
+parser_zip_to_zarr.add_argument(
+    'root_path',
+    help='The root path containing raw Sentinel zips e.g. ~/55HBU/',
+)
+parser_zip_to_zarr.add_argument(
+    'out_zarr',
+    help='Path to output zarr file e.g. ~/55HBU.zarr'
+)
+parser_zip_to_zarr.set_defaults(
+    func=zip_to_zarr
+)
+
+parser_interpolated_to_zarr = subparsers.add_parser('interpolated-to-zarr')
+parser_interpolated_to_zarr.add_argument(
+    'in_tif',
+    help='The path to interpolated Sentinel tif for one tile',
+)
+parser_interpolated_to_zarr.add_argument(
+    'out_zarr',
+    help='Path to output zarr file e.g. ~/55HBU_GapFilled_Image.zarr'
+)
+parser_interpolated_to_zarr.add_argument(
+    '--chunk_size',
+    default=1024,
+    help='Chunk size of output zarr files.',
+    dest='chunk_size'
+)
+parser_interpolated_to_zarr.add_argument(
+    '--step_size',
+    default=20,
+    help='Number of 10980*10980 slices to convert at once.',
+    dest='step_size'
+)
+parser_interpolated_to_zarr.set_defaults(
+    func=interpolated_to_zarr
+)
+
+parser_zarr_to_multiscale = subparsers.add_parser('zarr-to-multiscale-zarr')
+parser_zarr_to_multiscale.add_argument(
+    'in_zarr',
+    help='Path to interpolated zarr e.g. ~/55HBU_GapFilled_Image.zarr',
+)
+parser_zarr_to_multiscale.add_argument(
+    'out_zarr',
+    help='Path to output directory for zarr file e.g. ~/55HBU_Multiscale.zarr'
+)
+parser_zarr_to_multiscale.add_argument(
+    'tilename',
+    help='Name of tile currently being processed'
+)
+parser_zarr_to_multiscale.add_argument(
+    '--min-shape',
+    default =1024,
+    type=int,
+    help="Smallest resolution of multiscale pyramid",
+    dest="min_shape"
+)
+parser_zarr_to_multiscale.set_defaults(
+    func= zarr_to_multiscale_zarr
+)
+
+def main(argv=sys.argv[1:]):
+    args = parser.parse_args(argv)
+    args.func(args)
+
+
+def processed_im_to_rechunked_zarr(filename, outname, chunk_size, step_size):
+    """Write interpolated Sentinel image to zarr, transposing axes to time oriented
+
+    Parameters
+    ----------
+    filename : str
+        path to interpolated tif
+    outname : str
+        path to output zarr
+    chunk_size : int
+        desired chunk_size for visible axes
+    step_size : int
+        number of 10980*10980 slices to process at once
+    """
+    tiff_f = tifffile.TiffFile(filename)
+    d_mmap = tiff_f.pages[0].asarray(out='memmap')
+    tiff_f.close()
+    d_transposed = d_mmap.transpose((2, 0, 1))
+
+    compressor = Blosc(cname='zstd', clevel=9, shuffle=Blosc.SHUFFLE, blocksize=0)
+
+    out_zarr = zarr.open(
+            outname, 
+            mode='w', 
+            shape=d_transposed.shape, 
+            dtype=d_transposed.dtype,
+            chunks=(1, chunk_size, chunk_size), 
+            compressor=compressor
+            )
+
+    for start in tqdm(range(0, d_transposed.shape[0], step_size)):
+        end = min(start + step_size, d_transposed.shape[0])
+
+        current_slice = np.copy(d_transposed[start:end, :, :])
+        out_zarr[start:end, :, :] = current_slice
+        del(current_slice)
+
+
+def write_multiscale_zarr(fn, out_fn, min_level_shape, bands, tilename):
+    """Write input zarr to multiscale OME-zarr with separate channel axis
+
+    Parameters
+    ----------
+    fn : str
+        path to input zarr
+    out_fn : str
+        path to output zarr
+    min_level_shape : tuple (int, int)
+        smallest desired resolution
+    bands : list
+        list of band names being processed
+    tilename : str
+        name of tile being processed
+    """
     im = da.from_zarr(fn)
 
     im_shape = im.shape
@@ -94,136 +260,12 @@ def zarr_to_multiscale_zarr(args):
             upper += 1 if upper >= 0 else -1
         contrast_limits[band] = (lower, upper)
 
-    write_zattrs(out_fn, contrast_limits, max_layer, args.tilename, bands)
-
-parser = argparse.ArgumentParser()
-subparsers = parser.add_subparsers()
-
-parser_zip_to_zarr = subparsers.add_parser('zip-to-zarr')
-parser_zip_to_zarr.add_argument(
-    'root_path',
-    help='The root path containing raw Sentinel zips e.g. ~/55HBU/',
-)
-parser_zip_to_zarr.add_argument(
-    'out_zarr',
-    help='Path to output zarr file e.g. ~/55HBU.zarr'
-)
-parser_zip_to_zarr.set_defaults(
-    func=zip_to_zarr
-)
-
-parser_interpolated_to_zarr = subparsers.add_parser('interpolated-to-zarr')
-parser_interpolated_to_zarr.add_argument(
-    'in_tif',
-    help='The path to interpolated Sentinel tif for one tile',
-)
-parser_interpolated_to_zarr.add_argument(
-    'out_zarr',
-    help='Path to output zarr file e.g. ~/55HBU_GapFilled_Image.zarr'
-)
-parser_interpolated_to_zarr.add_argument(
-    '--chunk_size',
-    default=1024,
-    help='Chunk size of output zarr files.',
-    dest='chunk_size'
-)
-parser_interpolated_to_zarr.add_argument(
-    '--step_size',
-    default=20,
-    help='Number of 10980*10980 slices to convert at once.',
-    dest='step_size'
-)
-parser_interpolated_to_zarr.set_defaults(
-    func=interpolated_to_zarr
-)
-
-INTERPOLATED_BANDS_LIST = [
-    "FRE_B2",
-    "FRE_B3",
-    "FRE_B4",
-    "FRE_B5",
-    "FRE_B6",
-    "FRE_B7",
-    "FRE_B8",
-    "FRE_B8A",
-    "FRE_B11",
-    "FRE_B12" 
-]
-# INTERPOLATED_BAND_INDICES = list(range(10))
-# INTERPOLATED_BANDS_TO_INDICES = dict(zip(INTERPOLATED_BANDS_LIST, INTERPOLATED_BAND_INDICES))
-# INTERPOLATED_INDICES_TO_BANDS = dict(zip(INTERPOLATED_BAND_INDICES, INTERPOLATED_BANDS_LIST))
-
-# NUM_INTERPOLATED_BANDS = 10
-DOWNSCALE = 2
-BAND_HEX_COLOR_DICT = {
-    'FRE_B2': 'FF0000',
-    'FRE_B3': '0000FF',
-    'FRE_B4': '00FF00'
-}
-parser_zarr_to_multiscale = subparsers.add_parser('zarr-to-multiscale-zarr')
-parser_zarr_to_multiscale.add_argument(
-    'in_zarr',
-    help='Path to interpolated zarr e.g. ~/55HBU_GapFilled_Image.zarr',
-)
-parser_zarr_to_multiscale.add_argument(
-    'out_zarr',
-    help='Path to output directory for zarr file e.g. ~/55HBU_Multiscale.zarr'
-)
-parser_zarr_to_multiscale.add_argument(
-    'tilename',
-    help='Name of tile currently being processed'
-)
-parser_zarr_to_multiscale.add_argument(
-    '--min-shape',
-    default =1024,
-    type=int,
-    help="Smallest resolution of multiscale pyramid",
-    dest="min_shape"
-)
-parser_zarr_to_multiscale.set_defaults(
-    func= zarr_to_multiscale_zarr
-)
-
-def main(argv=sys.argv[1:]):
-    args = parser.parse_args(argv)
-    args.func(args)
-
-
-def processed_im_to_rechunked_zarr(filename, outname, chunk_size, step_size):
-    tiff_f = tifffile.TiffFile(filename)
-    d_mmap = tiff_f.pages[0].asarray(out='memmap')
-    tiff_f.close()
-    d_transposed = d_mmap.transpose((2, 0, 1))
-
-    compressor = Blosc(cname='zstd', clevel=9, shuffle=Blosc.SHUFFLE, blocksize=0)
-
-    z_arr = zarr.open(
-            outname, 
-            mode='w', 
-            shape=d_transposed.shape, 
-            dtype=d_transposed.dtype,
-            chunks=(1, chunk_size, chunk_size), 
-            compressor=compressor
-            )
-
-    start = 0
-    for start in tqdm(range(0, d_transposed.shape[0], step_size)):
-        end = min(start + step_size, d_transposed.shape[0])
-
-        current_slice = np.copy(d_transposed[start:end, :, :])
-        z_arr[start:end, :, :] = current_slice
-        del(current_slice)
-
-    # print("Copying remainder...")
-    # if num_selected_slices % step_size != 0:
-    #     final_slice_indices = selected_band_indices[end:]
-    #     final_slice = np.copy(d_transposed[final_slice_indices, :, :])
-    #     z_arr[end_zarr:, :, :] = final_slice
+    write_zattrs(out_fn, contrast_limits, max_layer, tilename, bands)
 
 
 def get_contrast_limits(band_frequencies):
-    """Compute contrast limits of the given band based on the frequencies of
-    pixel values given. Returns the middle 95th percentile.
+    """Compute middle 95th percentile contrast limits using given band frequencies
+
     Parameters
     ----------
     band_frequencies : list of np.ndarray
@@ -231,7 +273,7 @@ def get_contrast_limits(band_frequencies):
     Returns
     -------
     tuple (int, int)
-        lower and upper contrast limits for this histogram based on middle 95th percentile
+        lower and upper 95th percentile contrast limits for this histogram 
     """
     frequencies = sum(band_frequencies)
     lower_limit = np.flatnonzero(
@@ -246,6 +288,25 @@ def get_contrast_limits(band_frequencies):
 
 
 def write_zattrs(out_fn, contrast_limits, max_layer, tilename, bands):
+    """Write zattrs dictionary matching the OME-zarr metadata spec [1]_ to file.
+
+    Parameters
+    ----------
+    out_fn : str
+        path to corresponding OME-zarr
+    contrast_limits : dict
+        dictionary of bands to contrast limits
+    max_layer : int
+        the highest layer in the multiscale pyramid
+    tilename : str
+        name of the tile being processed
+    bands : list of str
+        list of bands being processed
+
+    References
+    ----------
+    .. [1] https://github.com/ome/omero-ms-zarr/blob/master/spec.md
+    """
     band_color_dict = defaultdict(lambda: 'FFFFFF', zip(BAND_HEX_COLOR_DICT.keys(), BAND_HEX_COLOR_DICT.values()))
     # write zattr file with contrast limits and remaining attributes
     zattr_dict = {}
@@ -261,7 +322,7 @@ def write_zattrs(out_fn, contrast_limits, max_layer, tilename, bands):
     for band in bands:
         zattr_dict["omero"]["channels"].append(
             {
-            "active" : band in ['FRE_B2', 'FRE_B3', 'FRE_B4'],
+            "active" : band in BAND_HEX_COLOR_DICT.keys(),
             "coefficient": 1,
             "color": band_color_dict[band],
             "family": "linear",
@@ -311,42 +372,4 @@ def get_histogram(im):
             ravelled, bins=np.arange(-2**15 - 0.5, 2**15)
         )[0]
     return masked_histogram
-
-
-
-def processed_im_to_zarr(filename, outname, chunk_size, step_size):
-    tiff_f = tifffile.TiffFile(filename)
-    d_mmap = tiff_f.pages[0].asarray(out='memmap')
-    tiff_f.close()
-    d_transposed = d_mmap.transpose((2, 0, 1))
-
-    compressor = Blosc(cname='zstd', clevel=9, shuffle=Blosc.SHUFFLE, blocksize=0)
-
-    z_arr = zarr.open(
-                outname, 
-                mode='w', 
-                shape=d_transposed.shape, 
-                dtype=d_transposed.dtype,
-                chunks=(d_transposed.shape[0], 1, 1000), 
-                compressor=compressor
-                )
-
-    for i in tqdm(range(d_transposed.shape[1])):
-        z_arr[:, i, :] = d_transposed[:, i, :]
-
-
-def rechunk_zarr(in_fn, out_dir, chunk_size):
-    source = da.from_zarr(in_fn)
-    intermediate = out_dir + "_intermediate.zarr"
-    target = out_dir + "_Rechunked_GapFilled_Image.zarr"
-    rechunked = rechunk(
-        source, 
-        target_chunks=(1, chunk_size, chunk_size), 
-        target_store=target,
-        max_mem="8GB",
-        temp_store=intermediate)
-    print(rechunked)
-    with progress.ProgressBar():
-        rechunked.execute()
-
 
