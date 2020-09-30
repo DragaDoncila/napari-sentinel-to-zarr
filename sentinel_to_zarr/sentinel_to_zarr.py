@@ -18,6 +18,7 @@ from rechunker import rechunk
 from dask.diagnostics import progress
 from sentinel_to_zarr.napari_sentinel_to_zarr import to_ome_zarr
 from napari_sentinel_zip.napari_sentinel_zip import reader_function
+from collections import defaultdict
 
 
 def zip_to_zarr(args):
@@ -30,13 +31,13 @@ def interpolated_to_zarr(args):
     out_fn = args.out_zarr
     
     # write out all channels to single scale zarr
-    processed_im_to_rechunked_zarr(fn, out_fn, args.chunk_size, args.step_size, args.selected_bands)
+    processed_im_to_rechunked_zarr(fn, out_fn, args.chunk_size, args.step_size)
 
 def zarr_to_multiscale_zarr(args):
     fn = args.in_zarr 
     out_fn = args.out_zarr     
     min_level_shape = (args.min_shape, args.min_shape)
-    bands = open(fn + "/bands.txt", 'r').readline().split(',')
+    bands = INTERPOLATED_BANDS_LIST
 
     im = da.from_zarr(fn)
 
@@ -108,13 +109,6 @@ parser_zip_to_zarr.add_argument(
     'out_zarr',
     help='Path to output zarr file e.g. ~/55HBU.zarr'
 )
-parser_zip_to_zarr.add_argument(
-    '--bands',
-    help='The bands to process.',
-    type=lambda string: string.split(','),
-    default= ['FRE_B2', 'FRE_B3', 'FRE_B4', 'FRE_B8'],
-    dest='selected_bands'
-)
 parser_zip_to_zarr.set_defaults(
     func=zip_to_zarr
 )
@@ -136,16 +130,9 @@ parser_interpolated_to_zarr.add_argument(
 )
 parser_interpolated_to_zarr.add_argument(
     '--step_size',
-    default=4,
+    default=20,
     help='Number of 10980*10980 slices to convert at once.',
     dest='step_size'
-)
-parser_interpolated_to_zarr.add_argument(
-    '--bands',
-    help='The bands to process.',
-    type=lambda string: string.split(','),
-    default= ['FRE_B2', 'FRE_B3', 'FRE_B4', 'FRE_B8'],
-    dest='selected_bands'
 )
 parser_interpolated_to_zarr.set_defaults(
     func=interpolated_to_zarr
@@ -163,12 +150,17 @@ INTERPOLATED_BANDS_LIST = [
     "FRE_B11",
     "FRE_B12" 
 ]
-INTERPOLATED_BAND_INDICES = list(range(10))
-INTERPOLATED_BANDS_TO_INDICES = dict(zip(INTERPOLATED_BANDS_LIST, INTERPOLATED_BAND_INDICES))
-INTERPOLATED_INDICES_TO_BANDS = dict(zip(INTERPOLATED_BAND_INDICES, INTERPOLATED_BANDS_LIST))
+# INTERPOLATED_BAND_INDICES = list(range(10))
+# INTERPOLATED_BANDS_TO_INDICES = dict(zip(INTERPOLATED_BANDS_LIST, INTERPOLATED_BAND_INDICES))
+# INTERPOLATED_INDICES_TO_BANDS = dict(zip(INTERPOLATED_BAND_INDICES, INTERPOLATED_BANDS_LIST))
 
-NUM_INTERPOLATED_BANDS = 10
+# NUM_INTERPOLATED_BANDS = 10
 DOWNSCALE = 2
+BAND_HEX_COLOR_DICT = {
+    'FRE_B2': 'FF0000',
+    'FRE_B3': '0000FF',
+    'FRE_B4': '00FF00'
+}
 parser_zarr_to_multiscale = subparsers.add_parser('zarr-to-multiscale-zarr')
 parser_zarr_to_multiscale.add_argument(
     'in_zarr',
@@ -198,7 +190,7 @@ def main(argv=sys.argv[1:]):
     args.func(args)
 
 
-def processed_im_to_rechunked_zarr(filename, outname, chunk_size, step_size, selected_bands):
+def processed_im_to_rechunked_zarr(filename, outname, chunk_size, step_size):
     tiff_f = tifffile.TiffFile(filename)
     d_mmap = tiff_f.pages[0].asarray(out='memmap')
     tiff_f.close()
@@ -206,50 +198,28 @@ def processed_im_to_rechunked_zarr(filename, outname, chunk_size, step_size, sel
 
     compressor = Blosc(cname='zstd', clevel=9, shuffle=Blosc.SHUFFLE, blocksize=0)
 
-    num_timepoints = d_transposed.shape[0] // 10
-    num_selected_slices = (num_timepoints) * len(selected_bands)
     z_arr = zarr.open(
             outname, 
             mode='w', 
-            shape=(num_selected_slices, d_transposed.shape[1], d_transposed.shape[2]), 
+            shape=d_transposed.shape, 
             dtype=d_transposed.dtype,
             chunks=(1, chunk_size, chunk_size), 
             compressor=compressor
             )
 
-    selected_band_indices = sorted([INTERPOLATED_BANDS_TO_INDICES[band] for band in selected_bands])
-    out_bands = [INTERPOLATED_INDICES_TO_BANDS[idx] for idx in selected_band_indices]
-    with open(outname + "/bands.txt", 'w') as band_file:
-        prefix = ""
-        for band in out_bands:
-            band_file.write(prefix + band)
-            prefix = ", "
-
-    
-    selected_band_indices = list(itertools.chain.from_iterable([[i*10 + idx for idx in selected_band_indices] for i in range(num_timepoints)]))
-
-
     start = 0
-    end = 0
-    num_chunks = num_selected_slices // step_size
-    start_zarr = 0
-    end_zarr = 0
-    for i in tqdm(range(0, num_chunks)):
-        start = i * step_size
-        end = start + step_size
-        current_slice_indices = selected_band_indices[start:end]
+    for start in tqdm(range(0, d_transposed.shape[0], step_size)):
+        end = min(start + step_size, d_transposed.shape[0])
 
-        current_slice = np.copy(d_transposed[current_slice_indices, :, :])
-        end_zarr += len(current_slice)
-        z_arr[start_zarr:end_zarr, :, :] = current_slice
-        start_zarr = end_zarr
+        current_slice = np.copy(d_transposed[start:end, :, :])
+        z_arr[start:end, :, :] = current_slice
         del(current_slice)
 
-    print("Copying remainder...")
-    if num_selected_slices % step_size != 0:
-        final_slice_indices = selected_band_indices[end:]
-        final_slice = np.copy(d_transposed[final_slice_indices, :, :])
-        z_arr[end_zarr:, :, :] = final_slice
+    # print("Copying remainder...")
+    # if num_selected_slices % step_size != 0:
+    #     final_slice_indices = selected_band_indices[end:]
+    #     final_slice = np.copy(d_transposed[final_slice_indices, :, :])
+    #     z_arr[end_zarr:, :, :] = final_slice
 
 
 def get_contrast_limits(band_frequencies):
@@ -277,6 +247,7 @@ def get_contrast_limits(band_frequencies):
 
 
 def write_zattrs(out_fn, contrast_limits, max_layer, tilename, bands):
+    band_color_dict = defaultdict(lambda: 'FFFFFF', zip(BAND_HEX_COLOR_DICT.keys(), BAND_HEX_COLOR_DICT.values()))
     # write zattr file with contrast limits and remaining attributes
     zattr_dict = {}
     zattr_dict["multiscales"] = []
@@ -291,10 +262,9 @@ def write_zattrs(out_fn, contrast_limits, max_layer, tilename, bands):
     for band in bands:
         zattr_dict["omero"]["channels"].append(
             {
-                # TODO: write proper colors and active channels here
             "active" : band in ['FRE_B2', 'FRE_B3', 'FRE_B4'],
             "coefficient": 1,
-            "color": "FFFFFF",
+            "color": band_color_dict[band],
             "family": "linear",
             "inverted": "false",
             "label": band,
