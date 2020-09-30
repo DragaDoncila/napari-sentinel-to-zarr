@@ -33,19 +33,18 @@ def interpolated_to_zarr(args):
     processed_im_to_rechunked_zarr(fn, out_fn, args.chunk_size, args.step_size, args.selected_bands)
 
 def zarr_to_multiscale_zarr(args):
-    print("zarr to multiscale", args)
     fn = args.in_zarr 
     out_fn = args.out_zarr     
-    min_level_shape = args.min_shape
+    min_level_shape = (args.min_shape, args.min_shape)
     bands = open(fn + "/bands.txt", 'r').readline().split(',')
 
     im = da.from_zarr(fn)
 
     im_shape = im.shape
-    num_slices = im_shape[0] // NUM_INTERPOLATED_BANDS
+    num_slices = im_shape[0] // len(bands)
     x = im_shape[1]
     y = im_shape[2]
-    im = da.reshape(im, (num_slices, NUM_INTERPOLATED_BANDS, x, y))
+    im = da.reshape(im, (num_slices, len(bands), x, y))
     compressor = Blosc(cname='zstd', clevel=9, shuffle=Blosc.SHUFFLE, blocksize=0)
     max_layer = np.log2(
         np.max(np.array(im_shape[1:]) / np.array(min_level_shape))
@@ -66,13 +65,12 @@ def zarr_to_multiscale_zarr(args):
         z_arr = zarr.open(
                 outname, 
                 mode='w', 
-                shape=(num_slices, NUM_INTERPOLATED_BANDS, 1, new_res[0], new_res[1]), 
+                shape=(num_slices, len(bands), 1, new_res[0], new_res[1]), 
                 dtype=im.dtype,
-                chunks=(1, 1, 1, im.chunks[1], im.chunks[2]), 
+                chunks=(1, 1, 1, im.chunksize[2], im.chunksize[3]), 
                 compressor=compressor
                 )
         zarrs.append(z_arr)
-
     # for each slice
     for i in tqdm(range(num_slices)):
         for j in tqdm(range(len(bands))):
@@ -81,18 +79,19 @@ def zarr_to_multiscale_zarr(args):
             im_pyramid = list(pyramid_gaussian(im_slice, max_layer=max_layer, downscale=DOWNSCALE))
             # for each resolution
             for k, new_im in enumerate(im_pyramid):
-                print(k, i, j)
-                # conver to uint16
+                # convert to uint16
                 new_im = skimage.img_as_uint(new_im)
                 # store into appropriate zarr at (slice, band, :)
                 zarrs[k][i, j, 0, :, :] = new_im
-            contrast_histogram[j].append(
+            contrast_histogram[bands[j]].append(
                 get_histogram(im_pyramid[-1])
             )
     
     contrast_limits = {}
     for band in bands:
         lower, upper = get_contrast_limits(contrast_histogram[band])
+        if upper - lower == 0:
+            upper += 1 if upper >= 0 else -1
         contrast_limits[band] = (lower, upper)
 
     write_zattrs(out_fn, contrast_limits, max_layer, args.tilename, bands)
@@ -137,7 +136,7 @@ parser_interpolated_to_zarr.add_argument(
 )
 parser_interpolated_to_zarr.add_argument(
     '--step_size',
-    default=20,
+    default=4,
     help='Number of 10980*10980 slices to convert at once.',
     dest='step_size'
 )
@@ -184,15 +183,15 @@ parser_zarr_to_multiscale.add_argument(
     help='Name of tile currently being processed'
 )
 parser_zarr_to_multiscale.add_argument(
-    '--min_shape',
-    default = (1024, 1024),
+    '--min-shape',
+    default =1024,
+    type=int,
     help="Smallest resolution of multiscale pyramid",
     dest="min_shape"
 )
 parser_zarr_to_multiscale.set_defaults(
     func= zarr_to_multiscale_zarr
 )
-
 
 def main(argv=sys.argv[1:]):
     args = parser.parse_args(argv)
@@ -209,24 +208,26 @@ def processed_im_to_rechunked_zarr(filename, outname, chunk_size, step_size, sel
 
     num_timepoints = d_transposed.shape[0] // 10
     num_selected_slices = (num_timepoints) * len(selected_bands)
+    z_arr = zarr.open(
+            outname, 
+            mode='w', 
+            shape=(num_selected_slices, d_transposed.shape[1], d_transposed.shape[2]), 
+            dtype=d_transposed.dtype,
+            chunks=(1, chunk_size, chunk_size), 
+            compressor=compressor
+            )
+
     selected_band_indices = sorted([INTERPOLATED_BANDS_TO_INDICES[band] for band in selected_bands])
     out_bands = [INTERPOLATED_INDICES_TO_BANDS[idx] for idx in selected_band_indices]
     with open(outname + "/bands.txt", 'w') as band_file:
+        prefix = ""
         for band in out_bands:
-            band_file.write(band + ", ")
+            band_file.write(prefix + band)
+            prefix = ", "
 
     
     selected_band_indices = list(itertools.chain.from_iterable([[i*10 + idx for idx in selected_band_indices] for i in range(num_timepoints)]))
 
-
-    z_arr = zarr.open(
-                outname, 
-                mode='w', 
-                shape=(num_selected_slices, d_transposed.shape[1], d_transposed.shape[2]), 
-                dtype=d_transposed.dtype,
-                chunks=(1, chunk_size, chunk_size), 
-                compressor=compressor
-                )
 
     start = 0
     end = 0
@@ -247,7 +248,7 @@ def processed_im_to_rechunked_zarr(filename, outname, chunk_size, step_size, sel
     print("Copying remainder...")
     if num_selected_slices % step_size != 0:
         final_slice_indices = selected_band_indices[end:]
-        final_slice = np.copy(d_transposed[current_slice_indices, :, :])
+        final_slice = np.copy(d_transposed[final_slice_indices, :, :])
         z_arr[end_zarr:, :, :] = final_slice
 
 
@@ -291,17 +292,18 @@ def write_zattrs(out_fn, contrast_limits, max_layer, tilename, bands):
         zattr_dict["omero"]["channels"].append(
             {
                 # TODO: write proper colors and active channels here
-            "active" : i==0,
+            "active" : band in ['FRE_B2', 'FRE_B3', 'FRE_B4'],
             "coefficient": 1,
             "color": "FFFFFF",
             "family": "linear",
             "inverted": "false",
             "label": band,
+            "name": band,
             "window": {
-                "end": contrast_limits[band][1],
+                "end": int(contrast_limits[band][1]),
                 "max": 65535,
                 "min": 0,
-                "start": contrast_limits[band][0]
+                "start": int(contrast_limits[band][0])
             }
             }
         )
