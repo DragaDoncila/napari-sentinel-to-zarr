@@ -1,10 +1,10 @@
 # napari-sentinel-to-zarr
 
-[![License](https://img.shields.io/pypi/l/napari-sentinel-to-zarr.svg?color=green)](https://github.com/napari/napari-sentinel-to-zarr/raw/master/LICENSE)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![PyPI](https://img.shields.io/pypi/v/napari-sentinel-to-zarr.svg?color=green)](https://pypi.org/project/napari-sentinel-to-zarr)
 [![Python Version](https://img.shields.io/pypi/pyversions/napari-sentinel-to-zarr.svg?color=green)](https://python.org)
 [![tests](https://github.com/DragaDoncila/napari-sentinel-to-zarr/workflows/tests/badge.svg)](https://github.com/DragaDoncila/napari-sentinel-to-zarr/actions)
-[![codecov](https://codecov.io/gh/DragaDoncila/napari-sentinel-to-zarr/branch/master/graph/badge.svg)](https://codecov.io/gh/DragaDoncila/napari-sentinel-to-zarr)
+<!-- [![codecov](https://codecov.io/gh/DragaDoncila/napari-sentinel-to-zarr/branch/master/graph/badge.svg)](https://codecov.io/gh/DragaDoncila/napari-sentinel-to-zarr) -->
 
 Writer plugin for napari to save Sentinel tiffs into ome-zarr format
 
@@ -22,11 +22,15 @@ https://napari.org/docs/plugins/index.html
 
 ## Installation
 
-You can install `napari-sentinel-to-zarr` via [pip]:
+You can install `sentinel-to-zarr` via [pip]:
 
+<<<<<<< HEAD
     pip install napari-sentinel-to-zarr
 <<<<<<< Updated upstream
 =======
+=======
+    pip install sentinel-to-zarr
+>>>>>>> fb66ae98f8a36fe3d90cd02f1892b326fc180b52
 
 ## Usage
 This package provides command-line utilities for:
@@ -66,7 +70,10 @@ You can pass in optional arguments
 
 ## Napari Plugin
 This package also comes with a napari writer plugin which allows you to open the raw tiles directly by dragging one into a napari viewer, and saving out while you browse using `File>Save Layers`
+<<<<<<< HEAD
 >>>>>>> Stashed changes
+=======
+>>>>>>> fb66ae98f8a36fe3d90cd02f1892b326fc180b52
 
 ## Contributing
 
