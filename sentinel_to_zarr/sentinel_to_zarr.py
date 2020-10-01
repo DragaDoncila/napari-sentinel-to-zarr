@@ -106,13 +106,13 @@ parser_interpolated_to_zarr.add_argument(
     help='Path to output zarr file e.g. ~/55HBU_GapFilled_Image.zarr'
 )
 parser_interpolated_to_zarr.add_argument(
-    '--chunk_size',
+    '--chunk-size',
     default=1024,
     help='Chunk size of output zarr files.',
     dest='chunk_size'
 )
 parser_interpolated_to_zarr.add_argument(
-    '--step_size',
+    '--step-size',
     default=20,
     help='Number of 10980*10980 slices to convert at once.',
     dest='step_size'
