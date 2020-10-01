@@ -22,15 +22,10 @@ https://napari.org/docs/plugins/index.html
 
 ## Installation
 
-You can install `sentinel-to-zarr` via [pip]:
+You can install `napari-sentinel-to-zarr` via [pip]:
 
-<<<<<<< HEAD
-    pip install napari-sentinel-to-zarr
-<<<<<<< Updated upstream
-=======
-=======
-    pip install sentinel-to-zarr
->>>>>>> fb66ae98f8a36fe3d90cd02f1892b326fc180b52
+    `pip install napari-sentinel-to-zarr`
+
 
 ## Usage
 This package provides command-line utilities for:
