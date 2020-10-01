@@ -17,6 +17,9 @@ import itertools
 from sentinel_to_zarr.napari_sentinel_to_zarr import to_ome_zarr
 from napari_sentinel_zip.napari_sentinel_zip import reader_function
 from collections import defaultdict
+import napari
+from ast import literal_eval
+import pandas as pd
 
 INTERPOLATED_BANDS_LIST = [
     "FRE_B2",
@@ -37,6 +40,8 @@ BAND_HEX_COLOR_DICT = {
     'FRE_B3': '0000FF',
     'FRE_B4': '00FF00'
 }
+
+LABEL_MAPPING = "./sentinel_to_zarr/class_map.txt"
 
 
 def zip_to_zarr(args):
@@ -79,6 +84,56 @@ def zarr_to_multiscale_zarr(args):
     bands = INTERPOLATED_BANDS_LIST
 
     write_multiscale_zarr(fn, out_fn, min_level_shape, bands, args.tilename)
+
+def load_all(args):
+    """Load raw, interpolated and label OME-zarrs into napari
+
+    Parameters
+    ----------
+    args : argparse Namespace
+        We expect raw_path as path to raw Sentinel image OME-zarr, interpolated_path as path to 
+        interpolated Sentinel image OME-zarr, and labels_path as path to label tiff.
+    """
+    label_properties, colour_dict = get_label_properties()
+
+    with napari.gui_qt():
+        viewer = napari.Viewer()
+        viewer.open(
+            args.raw_path,
+            scale=(365/108, 1, 1, 1),
+            visible=False
+            )
+        viewer.open(
+            args.interpolated_path,
+            scale=(365/73, 1, 1, 1), 
+            multiscale=True,
+        )
+        viewer.open(
+            args.labels_path,
+            scale=(1,1),
+            layer_type="labels",
+            properties=label_properties,
+            color=colour_dict,
+            opacity=0.4
+        )
+
+def get_label_properties():
+    df = pd.read_csv(LABEL_MAPPING)
+
+    dicts = df.to_dict('split')
+    classes = list(df['class'])
+    colors = [tuple([v / 255 for v in literal_eval(val)]) for val in list(df['colour'])]
+
+    label_properties = {
+        'class': ['None'] + classes
+    }
+
+    colour_indices = [i for i in range(df.shape[0] + 1)]
+    colours = [(0, 0, 0, 0)] + colors
+    colour_dict = dict(zip(colour_indices, colours))
+
+    return label_properties, colour_dict
+
 
 parser = argparse.ArgumentParser()
 subparsers = parser.add_subparsers()
@@ -143,6 +198,23 @@ parser_zarr_to_multiscale.add_argument(
 )
 parser_zarr_to_multiscale.set_defaults(
     func= zarr_to_multiscale_zarr
+)
+
+parser_load_all = subparsers.add_parser('load-all')
+parser_load_all.add_argument(
+    'raw_path',
+    help='Path to OME-zarr of raw images',
+)
+parser_load_all.add_argument(
+    'interpolated_path',
+    help='Path to OME-zarr of interpolated images'
+)
+parser_load_all.add_argument(
+    'labels_path',
+    help='Path to labels tiff'
+)
+parser_load_all.set_defaults(
+    func=load_all
 )
 
 def main(argv=sys.argv[1:]):
