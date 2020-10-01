@@ -22,9 +22,48 @@ https://napari.org/docs/plugins/index.html
 
 ## Installation
 
-You can install `napari-sentinel-to-zarr` via [pip]:
+You can install `sentinel-to-zarr` via [pip]:
 
-    pip install napari-sentinel-to-zarr
+    pip install sentinel-to-zarr
+
+## Usage
+This package provides command-line utilities for:
+- Processing raw Sentinel zips of a tile into multiscale zarr
+- Processing interpolated “GapFilled” tif for that tile into zarr, rechunking along time axis
+- Processing the zarr from step 2 into multiscale OME-zarr
+
+
+### Raw Zipped Images to Zarr
+Install the latest version of napari using
+
+`pip install -U napari`
+
+Install napari-sentinel-to-zarr using 
+
+`pip install napari-sentinel-to-zarr`
+
+Run `sentinel-to-zarr zip-to-zarr path/to/tile/55HBU out/path/dir/55HBU.zarr`
+
+where `path/to/tile/55HBU` is a directory full of Sentinel zips
+
+### Interpolated Images to Zarr
+Run `sentinel-to-zarr interpolated-to-zarr path/to/interpolated/55HBU_GapFilled_Image.tif out/dir/Image.zarr`
+
+You can pass in optional arguments:
+- `--step-size` - how many slices to convert at once. The default is 20 which will require ~5GB RAM. A larger step size means more slices can be loaded at once, and will speed up performance. A full image is typically ~175GB.
+- `--chunk-size` - the chunk size of the resulting zarr. Default is 1024 which is typically considered a good option and provides good performance
+
+
+### Interpolated Zarr to Multiscale Zarr
+Run `sentinel-to-zarr zarr-to-multiscale-zarr path/to/interpolated/zarr out/path/interpolated_multiscale.zarr tilename`
+
+Where `path/to/interpolated/zarr` is the output file from step 2
+
+You can pass in optional arguments
+- `--min-shape-` the smallest pyramid level you wish to generate. Default is 1024px
+
+## Napari Plugin
+This package also comes with a napari writer plugin which allows you to open the raw tiles directly by dragging one into a napari viewer, and saving out while you browse using `File>Save Layers`
 
 ## Contributing
 
