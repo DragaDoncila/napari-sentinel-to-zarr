@@ -26,10 +26,10 @@ from numcodecs.blosc import Blosc
 import json
 
 DOWNSCALE = 2
-
-BANDTUPS = {
-    True: [('FRE_B4', 'FF0000'), ('FRE_B3', '00FF00'), ('FRE_B2', '0000FF')], #true colour
-    False: [('FRE_B8', 'FF0000'), ('FRE_B4', '00FF00'), ('FRE_B3', '0000FF')], #NIR
+COLORMAP_HEX_COLOR_DICT = {
+    'red': 'FF0000',
+    'blue': '0000FF',
+    'green': '00FF00'
 }
 
 @napari_hook_implementation
@@ -71,10 +71,11 @@ def to_ome_zarr(path, layer_data: List[Tuple[Any, Dict, str]]):
     """
     # remove the low resolution quick-look image
     layer_data = list(filter(lambda dat: dat[1]['name'] != 'QKL_ALL', layer_data))
+    # TODO: because masks are in there we still get two shapes even if no low res bands were selected
     by_shape = tz.groupby(lambda dat: dat[0].shape, layer_data)
     if len(by_shape) > 1:
         basepath, extension = os.path.splitext(path)
-        paths = [basepath + str(shape) + '.' + extension for shape in by_shape]
+        paths = [basepath + '_' + str(shape) + extension for shape in by_shape]
     else:
         paths = [path]
 
@@ -83,9 +84,7 @@ def to_ome_zarr(path, layer_data: List[Tuple[Any, Dict, str]]):
         bands,
         [[] for i in range(len(bands))]
     ))
-    # images = [layer for layer in layer_data if layer[2] == 'image']
-    # masks = [layer for layer in layer_data if layer[2] == 'labels']
-    
+
     for path, (shape, datasets) in zip(paths, by_shape.items()):
         # only take into account pixels that are in the satellite FOV
         mask = [data[0] for data in datasets if data[1]['name'].startswith('EDG')][0]
@@ -100,8 +99,9 @@ def to_ome_zarr(path, layer_data: List[Tuple[Any, Dict, str]]):
             for k, (image, image_meta, _) \
                     in tqdm(enumerate(image_layers), desc=f'writing bands'):
                 # get downsampled zarr cube for this timepoint and band
+                imagej = np.asarray(image[j])
                 out_zarrs = band_at_timepoint_to_zarr(
-                    image[j],
+                    imagej,
                     j,
                     k,
                     out_zarrs=out_zarrs,
@@ -111,7 +111,7 @@ def to_ome_zarr(path, layer_data: List[Tuple[Any, Dict, str]]):
 
                 # get frequencies of each pixel for this band and timepoint, masking partial tiles
                 band_at_timepoint_histogram = get_masked_histogram(
-                    image[j], mask[0, :, :]
+                    imagej, np.asarray(mask[0, :, :])
                 )
                 band = image_meta['name']
                 contrast_histogram[band].append(
@@ -123,11 +123,14 @@ def to_ome_zarr(path, layer_data: List[Tuple[Any, Dict, str]]):
         bands = [image_meta['name'] for _, image_meta, _ in image_layers]
         for band in bands:
             lower, upper = get_contrast_limits(contrast_histogram[band])
+            if upper - lower == 0:
+                upper += 1 if upper >= 0 else -1
             contrast_limits[band] = (lower, upper)
 
         band_tuples = [
-            (image_meta['name'], image_meta['colormap'])
-            for _, image_meta, _ in image_layers
+            (image_meta['name'], COLORMAP_HEX_COLOR_DICT[image_meta['colormap']])
+            for _, image_meta, _ in image_layers if
+            image_meta['name'] in ['FRE_B2', 'FRE_B3', 'FRE_B4']
         ]
         zattrs = generate_zattrs(
             tile=os.path.basename(path),
@@ -255,12 +258,13 @@ def generate_zattrs(
     for band in bands:
         color = band_colormap[band]
         zattr_dict['omero']['channels'].append({
-            'active' : band in dict(band_colormap_tup),
+            'active' : band in ['FRE_B2', 'FRE_B3', 'FRE_B4'],
             'coefficient': 1,
             'color': color,
             'family': 'linear',
             'inverted': 'false',
             'label': band,
+            'name': band
         })
         if contrast_limits is not None and band in contrast_limits:
             lower_contrast_limit, upper_contrast_limit = contrast_limits[band]

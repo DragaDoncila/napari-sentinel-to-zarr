@@ -22,7 +22,7 @@ with open('requirements.txt') as f:
 
 
 # https://github.com/pypa/setuptools_scm
-use_scm = {"write_to": "napari_sentinel_to_zarr/_version.py"}
+use_scm = {"write_to": "sentinel_to_zarr/_version.py"}
 
 setup(
     name='napari-sentinel-to-zarr',
@@ -54,7 +54,10 @@ setup(
     ],
     entry_points={
         'napari.plugin': [
-            'sentinel_to_zarr = napari_sentinel_to_zarr',
+            'napari_sentinel_to_zarr = sentinel_to_zarr.napari_sentinel_to_zarr',
         ],
+        'console_scripts': [
+            'sentinel-to-zarr = sentinel_to_zarr.sentinel_to_zarr:main'
+        ]
     },
 )
