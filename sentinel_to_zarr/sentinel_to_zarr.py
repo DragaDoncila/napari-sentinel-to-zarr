@@ -42,7 +42,7 @@ BAND_HEX_COLOR_DICT = {
 }
 
 LABEL_MAPPING = "./sentinel_to_zarr/class_map.txt"
-
+DEFAULT_LIMS = (0, 6600)
 
 def zip_to_zarr(args):
     """Save raw, zipped Sentinel tiffs to multiscale OME-zarr
@@ -329,7 +329,7 @@ def write_multiscale_zarr(fn, out_fn, min_level_shape, bands, tilename):
     for band in bands:
         lower, upper = get_contrast_limits(contrast_histogram[band])
         if upper - lower == 0:
-            upper += 1 if upper >= 0 else -1
+            lower, upper = DEFAULT_LIMS
         contrast_limits[band] = (lower, upper)
 
     write_zattrs(out_fn, contrast_limits, max_layer, tilename, bands)
