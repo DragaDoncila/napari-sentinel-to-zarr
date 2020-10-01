@@ -7,3 +7,4 @@ numcodecs
 zarr
 tqdm
 dask
+pandas
