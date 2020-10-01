@@ -1,13 +1,19 @@
 import numpy as np
 from sentinel_to_zarr.napari_sentinel_to_zarr import to_ome_zarr
 from napari_sentinel_zip.napari_sentinel_zip import reader_function
+import os
+import shutil
 
 
 def test_read_write():
-    zipfn = "/media/draga/My Passport/pepsL2A_zip_img/55HBV/"
+    zipfn = "./sentinel_to_zarr/_tests/Test_Tile"
     data = reader_function(zipfn)
-    outfn = "/media/draga/Elements/55HBV_Raw.zarr"
-    out_paths = to_ome_zarr(outfn, data)
+    outfn = "./sentinel_to_zarr/_tests/Test_Tile.zarr"
+    out_paths = to_ome_zarr(outfn, data[0:4])
+    assert len(out_paths) == 2
+    assert os.path.exists("./sentinel_to_zarr/_tests/Test_Tile_(10, 10980, 10980).zarr")
+    shutil.rmtree("./sentinel_to_zarr/_tests/Test_Tile_(10, 10980, 10980).zarr")
+    shutil.rmtree("./sentinel_to_zarr/_tests/Test_Tile_(10, 5490, 5490).zarr")
 
 
 # # tmp_path is a pytest fixture
