@@ -1,0 +1,16 @@
+value,class,colour
+1,Urban,"(255, 100, 100)"
+2,Water,"(0, 40, 200)"
+3,Deciduous Woody Horticulture,"(148, 50, 165)"
+4,Evergreen Woody Horticulture,"(253, 174,229)"
+5,Non-Woody Horticulture,"(198, 196, 216)"
+6,Native Woody Cover,"(50, 150, 0)"
+7,Hardwood Plantation,"(255, 255, 192)"
+8,Softwood Plantation,"(226, 243, 163)"
+9,Bare Ground,"(145, 130, 105)"
+10,Brassica,"(255, 255, 0)"
+11,Cereals,"(255, 210, 125)"
+12,Legumes,"(255, 140, 0)"
+13,Grassland,"(190, 230, 90)"
+
+
