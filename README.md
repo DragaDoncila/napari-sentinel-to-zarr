@@ -1,10 +1,10 @@
 # napari-sentinel-to-zarr
 
-[![License](https://img.shields.io/pypi/l/napari-sentinel-to-zarr.svg?color=green)](https://github.com/napari/napari-sentinel-to-zarr/raw/master/LICENSE)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![PyPI](https://img.shields.io/pypi/v/napari-sentinel-to-zarr.svg?color=green)](https://pypi.org/project/napari-sentinel-to-zarr)
 [![Python Version](https://img.shields.io/pypi/pyversions/napari-sentinel-to-zarr.svg?color=green)](https://python.org)
 [![tests](https://github.com/DragaDoncila/napari-sentinel-to-zarr/workflows/tests/badge.svg)](https://github.com/DragaDoncila/napari-sentinel-to-zarr/actions)
-[![codecov](https://codecov.io/gh/DragaDoncila/napari-sentinel-to-zarr/branch/master/graph/badge.svg)](https://codecov.io/gh/DragaDoncila/napari-sentinel-to-zarr)
+<!-- [![codecov](https://codecov.io/gh/DragaDoncila/napari-sentinel-to-zarr/branch/master/graph/badge.svg)](https://codecov.io/gh/DragaDoncila/napari-sentinel-to-zarr) -->
 
 Writer plugin for napari to save Sentinel tiffs into ome-zarr format
 
