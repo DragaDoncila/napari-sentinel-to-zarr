@@ -92,7 +92,7 @@ def load_all(args):
     ----------
     args : argparse Namespace
         We expect raw_path as path to raw Sentinel image OME-zarr, interpolated_path as path to 
-        interpolated Sentinel image OME-zarr, and labels_path as path to label tiff.
+        interpolated Sentinel image OME-zarr, and labels_path as path to label tiff or single-scale zarr.
     """
     label_properties, colour_dict = get_label_properties()
 
@@ -104,6 +104,8 @@ def load_all(args):
             scale=(365/108, 1, 1, 1),
             visible=False
             )
+        for layer in viewer.layers:
+            layer.name = f"Raw_{layer.name}"
         viewer.open(
             args.interpolated_path,
             scale=(365/73, 1, 1, 1), 
