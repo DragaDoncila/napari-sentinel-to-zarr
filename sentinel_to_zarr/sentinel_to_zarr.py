@@ -42,7 +42,7 @@ BAND_HEX_COLOR_DICT = {
 }
 
 LABEL_MAPPING = "./sentinel_to_zarr/class_map.txt"
-DEFAULT_LIMS = (0, 6000)
+DEFAULT_LIMS = (-20, 1900)
 
 def zip_to_zarr(args):
     """Save raw, zipped Sentinel tiffs to multiscale OME-zarr
