@@ -42,7 +42,7 @@ BAND_HEX_COLOR_DICT = {
 }
 
 LABEL_MAPPING = "./sentinel_to_zarr/class_map.txt"
-DEFAULT_LIMS = (0, 6600)
+DEFAULT_LIMS = (0, 6000)
 
 def zip_to_zarr(args):
     """Save raw, zipped Sentinel tiffs to multiscale OME-zarr
@@ -97,6 +97,7 @@ def load_all(args):
     label_properties, colour_dict = get_label_properties()
 
     with napari.gui_qt():
+        napari.utils.dask_utils.resize_dask_cache(mem_fraction=0.1)
         viewer = napari.Viewer()
         viewer.open(
             args.raw_path,
@@ -322,7 +323,7 @@ def write_multiscale_zarr(fn, out_fn, min_level_shape, bands, tilename):
                 # store into appropriate zarr at (slice, band, :)
                 zarrs[k][i, j, 0, :, :] = new_im
             contrast_histogram[bands[j]].append(
-                get_histogram(im_pyramid[-1])
+                get_histogram(new_im)
             )
     
     contrast_limits = {}
@@ -384,7 +385,7 @@ def write_zattrs(out_fn, contrast_limits, max_layer, tilename, bands):
     zattr_dict = {}
     zattr_dict["multiscales"] = []
     zattr_dict["multiscales"].append({"datasets" : []})
-    for i in range(max_layer):
+    for i in range(max_layer+1):
         zattr_dict["multiscales"][0]["datasets"].append({
             "path": f"{i}"
         })
@@ -440,8 +441,67 @@ def get_histogram(im):
     """
 
     ravelled = np.ravel(im)
-    masked_histogram = np.histogram(
+    histogram = np.histogram(
             ravelled, bins=np.arange(-2**15 - 0.5, 2**15)
         )[0]
-    return masked_histogram
+    return histogram
 
+
+def recompute_contrast_limits(in_zarr, pyramid_level):
+    """Helper function to recompute contrast limits for a multiscale multichannel OME-zarr
+
+    Parameters
+    ----------
+    in_zarr : str
+        path to OME-zarr
+    pyramid_level : int
+        level of pyramid to use for contrast limits.
+    """
+    bands, max_layer, tilename = get_zattr_info(in_zarr)
+    in_im = da.from_zarr(f"{in_zarr}/{pyramid_level}")
+
+    contrast_histogram = dict(zip(
+        bands,
+        [[] for i in range(len(bands))]
+    ))
+
+    for i,j in tqdm(itertools.product(range(in_im.shape[0]), range(in_im.shape[1]))):
+            current_im = in_im[i, j, 0, :, :]
+            current_band = bands[j]
+
+            contrast_histogram[current_band].append(
+                get_histogram(np.asarray(current_im))
+            )
+    
+    contrast_limits = {}
+    for band in bands:
+        lower, upper = get_contrast_limits(contrast_histogram[band])
+        if upper - lower == 0:
+            lower, upper = DEFAULT_LIMS
+        contrast_limits[band] = (lower, upper)
+
+    write_zattrs(in_zarr, contrast_limits, max_layer, tilename, bands)
+
+def get_zattr_info(in_zarr):
+    """Parse zattrs of given OME-zarr and return bands, max layer and tilename
+
+    Parameters
+    ----------
+    in_zarr : str
+        path to OME-zarr
+
+    Returns
+    -------
+    info: tuple(list, int, str)
+        tuple of bands, max layer and tilename retrieved from zattrs
+    """
+    with open(in_zarr+'/.zattrs') as f:
+        zattrs = json.load(f)
+    bands = [channel['name'] for channel in zattrs['omero']['channels']]
+    
+    pth_list = zattrs['multiscales'][0]['datasets']
+    layers = [int(pth_list[int(i)]['path']) for i in range(len(pth_list))]
+    max_layer = max(layers)
+
+    tilename = zattrs['omero']['name']
+    return bands, max_layer, tilename
