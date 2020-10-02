@@ -1,5 +1,6 @@
 napari-plugin-engine>=0.1.4
 napari-sentinel-zip
+ome-zarr
 numpy
 toolz>=0.10
 scikit-image
@@ -9,3 +10,5 @@ tqdm
 dask
 pandas
 matplotlib
+pytest
+fsspec>=0.3.3
