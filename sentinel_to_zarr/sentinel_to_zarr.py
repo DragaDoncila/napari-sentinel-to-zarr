@@ -242,7 +242,7 @@ def processed_im_to_rechunked_zarr(filename, outname, chunk_size, step_size):
     tiff_f = tifffile.TiffFile(filename)
     d_mmap = tiff_f.pages[0].asarray(out='memmap')
     tiff_f.close()
-    d_transposed = d_mmap.transpose((2, 0, 1))
+    d_transposed = d_mmap.transpose((2, 1, 0))
 
     compressor = Blosc(cname='zstd', clevel=9, shuffle=Blosc.SHUFFLE, blocksize=0)
 
