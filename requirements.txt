@@ -8,3 +8,4 @@ zarr
 tqdm
 dask
 pandas
+matplotlib
