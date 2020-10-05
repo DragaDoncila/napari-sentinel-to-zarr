@@ -65,10 +65,6 @@ You can pass in optional arguments
 
 ## Napari Plugin
 This package also comes with a napari writer plugin which allows you to open the raw tiles directly by dragging one into a napari viewer, and saving out while you browse using `File>Save Layers`
-<<<<<<< HEAD
->>>>>>> Stashed changes
-=======
->>>>>>> fb66ae98f8a36fe3d90cd02f1892b326fc180b52
 
 ## Contributing
 
