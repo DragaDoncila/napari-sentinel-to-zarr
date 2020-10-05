@@ -166,19 +166,18 @@ def load_all(args):
         viewer.dims.events.axis.connect(update_plot)
 
 
-        # grab the image layer (arbitrarily red)
-        layer = viewer.layers['FRE_B2']
-
-
-        # add a click callback to the layer to update the spectrum being viewed
-        @layer.mouse_drag_callbacks.append
         def update_intensity(layer, event):
             xs, ys = intensity_line.get_data()
             coords_full = tuple(np.round(layer._transforms.simplified(layer.coordinates)).astype(int))
-            print(f"Updating plot for {coords_full}...")
-            if all(coords_full[i] in range(intensity_plot_im.shape[i])
-                    for i in range(intensity_plot_im.ndim)):
-                coords = coords_full[1:]  # rows, columns
+            print(f"Updating plot for {coords_full[-2::]}...")
+            if layer.name == 'Labels':
+                in_range = all(coords_full[i] in range(intensity_plot_im.shape[i+2]) for i in range(2))
+                coords = tuple((0, *coords_full))   # z, rows, columns
+            else:
+                in_range = all(coords_full[i] in range(intensity_plot_im.shape[i])
+                    for i in range(intensity_plot_im.ndim))
+                coords = coords_full[1:]  # z, rows, columns
+            if in_range:
                 new_ys = intensity_plot_im[:, coords[0], coords[1], coords[2]]
                 min_y = np.min(new_ys)
                 max_y = np.max(new_ys)
@@ -188,6 +187,11 @@ def load_all(args):
                 title.set_text(intens_str + ': ' + str(coords))
                 intensity_canvas.draw_idle()
 
+        for layer in viewer.layers:
+            # add a click callback to each layer to update the spectrum being viewed
+            layer.mouse_drag_callbacks.append(update_intensity)
+
+            
 def get_label_properties():
     df = pd.read_csv(LABEL_MAPPING)
 
