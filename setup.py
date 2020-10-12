@@ -26,7 +26,7 @@ use_scm = {"write_to": "sentinel_to_zarr/_version.py"}
 
 setup(
     name='napari-sentinel-to-zarr',
-    version='0.0.4',
+    version='0.0.5',
     author='Draga Doncila Pop',
     author_email='ddon0001@student.monash.edu',
     license='MIT',
