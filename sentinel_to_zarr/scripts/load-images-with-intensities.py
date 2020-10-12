@@ -9,7 +9,8 @@ import numpy as np
 LABEL_MAPPING = "./sentinel_to_zarr/class_map.txt"
 RAW_PATH = "/media/draga/My Passport/Zarr/55HBU_Raw/10m_Res.zarr"
 INTERPOLATED_PATH = "/media/draga/My Passport/55HBU_GapFilled_Multiscale.zarr"
-LABELS_PATH = "/media/draga/My Passport/Zarr/55HBU_Multiscale_Labels.zarr/0/"
+LABELS_PATH = "/media/draga/My Passport/55HBU_Labels.zarr"
+LEVEL = 0
 
 def main():
     label_properties, colour_dict = get_label_properties()
@@ -41,7 +42,7 @@ def main():
         )
 
         # aribitrarily grab red layer
-        intensity_plot_im = viewer.layers['FRE_B2'].data[0]
+        intensity_plot_im = viewer.layers['FRE_B2'].data[LEVEL]
         # create the intensity plot
         with plt.style.context('dark_background'):
             intensity_canvas = FigureCanvas(Figure(figsize=(5, 3)))
@@ -84,9 +85,8 @@ def main():
 
         def update_intensity(layer, event):
             xs, ys = intensity_line.get_data()
-            coords_full = tuple(np.round(layer._transforms.simplified(layer.coordinates)).astype(int))
-            print(f"Updating plot for {coords_full[-2::]}...")
-            if layer.name == 'Labels':
+            coords_full = tuple(np.round(layer._transforms.simplified(layer.coordinates)).astype(int) // 2**LEVEL) 
+            if "LABELS" in layer.name.upper():
                 in_range = all(coords_full[i] in range(intensity_plot_im.shape[i+2]) for i in range(2))
                 coords = tuple((0, *coords_full))   # z, rows, columns
             else:
@@ -94,6 +94,7 @@ def main():
                     for i in range(intensity_plot_im.ndim))
                 coords = coords_full[1:]  # z, rows, columns
             if in_range:
+                print(f"Updating plot for {coords_full[-2::]}...")
                 new_ys = intensity_plot_im[:, coords[0], coords[1], coords[2]]
                 min_y = np.min(new_ys)
                 max_y = np.max(new_ys)
