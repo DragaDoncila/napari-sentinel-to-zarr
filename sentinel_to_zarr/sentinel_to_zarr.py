@@ -97,6 +97,7 @@ def load_all(args):
         We expect raw_path as path to raw Sentinel image OME-zarr, interpolated_path as path to 
         interpolated Sentinel image OME-zarr, and labels_path as path to label tiff or single-scale zarr.
     """
+    LEVEL = 0
     label_properties, colour_dict = get_label_properties()
 
     with napari.gui_qt():
@@ -124,7 +125,7 @@ def load_all(args):
         )
 
         # aribitrarily grab red layer
-        intensity_plot_im = viewer.layers['FRE_B2'].data[0]
+        intensity_plot_im = viewer.layers['FRE_B2'].data[LEVEL]
         # create the intensity plot
         with plt.style.context('dark_background'):
             intensity_canvas = FigureCanvas(Figure(figsize=(5, 3)))
@@ -168,9 +169,8 @@ def load_all(args):
 
         def update_intensity(layer, event):
             xs, ys = intensity_line.get_data()
-            coords_full = tuple(np.round(layer._transforms.simplified(layer.coordinates)).astype(int))
-            print(f"Updating plot for {coords_full[-2::]}...")
-            if layer.name == 'Labels':
+            coords_full = tuple(np.round(layer._transforms.simplified(layer.coordinates)).astype(int) // 2**LEVEL) 
+            if "LABELS" in layer.name.upper():
                 in_range = all(coords_full[i] in range(intensity_plot_im.shape[i+2]) for i in range(2))
                 coords = tuple((0, *coords_full))   # z, rows, columns
             else:
@@ -178,6 +178,7 @@ def load_all(args):
                     for i in range(intensity_plot_im.ndim))
                 coords = coords_full[1:]  # z, rows, columns
             if in_range:
+                print(f"Updating plot for {coords_full[-2::]}...")
                 new_ys = intensity_plot_im[:, coords[0], coords[1], coords[2]]
                 min_y = np.min(new_ys)
                 max_y = np.max(new_ys)
