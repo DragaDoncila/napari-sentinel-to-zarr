@@ -8,12 +8,14 @@ import numpy as np
 
 LABEL_MAPPING = "./sentinel_to_zarr/class_map.txt"
 RAW_PATH = "/media/draga/My Passport/Zarr/55HBU_Raw/10m_Res.zarr"
-INTERPOLATED_PATH = "/media/draga/My Passport/55HBU_GapFilled_Multiscale.zarr"
+INTERPOLATED_PATH = "/media/draga/Elements/55HBU_GapFilled_Multiscale.zarr"
 LABELS_PATH = "/media/draga/My Passport/55HBU_Labels.zarr"
 LEVEL = 0
 
 def main():
-    label_properties, colour_dict = get_label_properties()
+    label_properties = {'class': ['None', 'Urban', 'Water', 'Deciduous Woody Horticulture', 'Evergreen Woody Horticulture', 'Non-Woody Horticulture', 'Native Woody Cover', 'Hardwood Plantation', 'Softwood Plantation', 'Bare Ground', 'Brassica', 'Cereals', 'Legumes', 'Grassland']}
+    
+    colour_dict = {0: (0, 0, 0, 0), 1: (1.0, 0.39215686274509803, 0.39215686274509803), 2: (0.0, 0.1568627450980392, 0.7843137254901961), 3: (0.5803921568627451, 0.19607843137254902, 0.6470588235294118), 4: (0.9921568627450981, 0.6823529411764706, 0.8980392156862745), 5: (0.7764705882352941, 0.7686274509803922, 0.8470588235294118), 6: (0.19607843137254902, 0.5882352941176471, 0.0), 7: (1.0, 1.0, 0.7529411764705882), 8: (0.8862745098039215, 0.9529411764705882, 0.6392156862745098), 9: (0.5686274509803921, 0.5098039215686274, 0.4117647058823529), 10: (1.0, 1.0, 0.0), 11: (1.0, 0.8235294117647058, 0.49019607843137253), 12: (1.0, 0.5490196078431373, 0.0), 13: (0.7450980392156863, 0.9019607843137255, 0.35294117647058826)}
 
     with napari.gui_qt():
         napari.utils.dask_utils.resize_dask_cache(mem_fraction=0.1)
