@@ -132,16 +132,16 @@ def main():
                     coords_full[i] in range(intensity_plot_im.shape[i + 2])
                     for i in range(2)
                 )
-                coords = tuple((0, *coords_full))  # z, rows, columns
+                coords = tuple(coords_full)  #rows, columns
             else:
                 in_range = all(
                     coords_full[i] in range(intensity_plot_im.shape[i])
                     for i in range(intensity_plot_im.ndim)
                 )
-                coords = coords_full[1:]  # z, rows, columns
+                coords = coords_full[-2:]  #rows, columns
             if in_range:
                 print(f"Updating plot for {coords_full[-2::]}...")
-                new_ys = intensity_plot_im[:, coords[0], coords[1], coords[2]]
+                new_ys = intensity_plot_im[:, :, coords[0], coords[1]]
                 min_y = np.min(new_ys)
                 max_y = np.max(new_ys)
                 intensity_axes.set_ylim(min_y, max_y)
