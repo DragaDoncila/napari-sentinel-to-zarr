@@ -26,7 +26,7 @@ use_scm = {"write_to": "sentinel_to_zarr/_version.py"}
 
 setup(
     name='napari-sentinel-to-zarr',
-    version='0.0.6',
+    version='0.0.7',
     author='Draga Doncila Pop',
     author_email='ddon0001@student.monash.edu',
     license='MIT',
@@ -35,7 +35,7 @@ setup(
     long_description=read('README.md'),
     long_description_content_type='text/markdown',
     packages=find_packages(),
-    python_requires='>=3.7',
+    python_requires='>=3.6',
     install_requires=requirements,
     classifiers=[
         'Development Status :: 4 - Beta',
