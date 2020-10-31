@@ -54,7 +54,12 @@ def main():
     with napari.gui_qt():
         napari.utils.dask_utils.resize_dask_cache(mem_fraction=0.1)
         viewer = napari.Viewer()
-        viewer.open(RAW_PATH, scale=(365 / 108, 1, 1, 1), visible=False)
+        viewer.open(
+            RAW_PATH, 
+            scale=(365 / 108, 1, 1, 1), 
+            visible=False
+        )
+        
         for layer in viewer.layers:
             layer.name = f"Raw_{layer.name}"
 
@@ -66,7 +71,7 @@ def main():
 
         viewer.open(
             LABELS_PATH,
-            scale=(1, 1, 1, 1),
+            scale=(365*2, 1, 1, 1),
             layer_type="labels",
             properties=label_properties,
             color=colour_dict,
@@ -123,16 +128,13 @@ def main():
 
         def update_intensity(layer, event):
             xs, ys = intensity_line.get_data()
-            coords_full = tuple(
-                np.round(layer.coordinates).astype(int)
-                // 2 ** LEVEL
-            )
+            coords_full = tuple(np.round(layer.coordinates).astype(int) // 2 ** LEVEL)
 
             in_range = all(
                 coords_full[i] in range(intensity_plot_im.shape[i])
                 for i in range(intensity_plot_im.ndim)
             )
-            coords = coords_full[-2:]  #rows, columns
+            coords = coords_full[-2:]  # rows, columns
             if in_range:
                 print(f"Updating plot for {coords}...")
                 new_ys = intensity_plot_im[:, :, coords[0], coords[1]]
