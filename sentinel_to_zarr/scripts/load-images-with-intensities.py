@@ -10,8 +10,8 @@ from PyQt5.QtWidgets import QVBoxLayout, QWidget
 LABEL_MAPPING = "./sentinel_to_zarr/class_map.txt"
 RAW_PATH = "/media/draga/My Passport/Zarr/55HBU_Raw/10m_Res.zarr"
 INTERPOLATED_PATH = "/media/draga/Elements/55HBU_GapFilled_Multiscale.zarr"
-LABELS_PATH = "/media/draga/My Passport/55HBU_Labels.zarr"
-LEVEL = 0
+LABELS_PATH = "/media/draga/My Passport/55HBU_Multiscale_Labels.zarr"
+LEVEL = 1
 
 
 def main():
@@ -66,7 +66,7 @@ def main():
 
         viewer.open(
             LABELS_PATH,
-            scale=(1, 1),
+            scale=(1, 1, 1, 1),
             layer_type="labels",
             properties=label_properties,
             color=colour_dict,
@@ -119,28 +119,22 @@ def main():
             intensity_canvas.draw_idle()
 
         # connect the function to the dims axis
-        viewer.dims.events.axis.connect(update_plot)
+        viewer.dims.events.current_step.connect(update_plot)
 
         def update_intensity(layer, event):
             xs, ys = intensity_line.get_data()
             coords_full = tuple(
-                np.round(layer._transforms.simplified(layer.coordinates)).astype(int)
+                np.round(layer.coordinates).astype(int)
                 // 2 ** LEVEL
             )
-            if "LABELS" in layer.name.upper():
-                in_range = all(
-                    coords_full[i] in range(intensity_plot_im.shape[i + 2])
-                    for i in range(2)
-                )
-                coords = tuple(coords_full)  #rows, columns
-            else:
-                in_range = all(
-                    coords_full[i] in range(intensity_plot_im.shape[i])
-                    for i in range(intensity_plot_im.ndim)
-                )
-                coords = coords_full[-2:]  #rows, columns
+
+            in_range = all(
+                coords_full[i] in range(intensity_plot_im.shape[i])
+                for i in range(intensity_plot_im.ndim)
+            )
+            coords = coords_full[-2:]  #rows, columns
             if in_range:
-                print(f"Updating plot for {coords_full[-2::]}...")
+                print(f"Updating plot for {coords}...")
                 new_ys = intensity_plot_im[:, :, coords[0], coords[1]]
                 min_y = np.min(new_ys)
                 max_y = np.max(new_ys)
