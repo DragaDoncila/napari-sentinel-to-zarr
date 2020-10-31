@@ -112,16 +112,18 @@ def main():
         layout.addWidget(intensity_canvas)
         viewer.window.add_dock_widget(widget)
 
-        # create a function to update the plot
+        # create a function to update the vertical bar corresponding to timepoint
         def update_plot(axis_event):
             axis = axis_event.axis
-            if axis != 0:
+            if axis != 1:
                 return
             x = axis_event.value
-            position_line.set_data([x, x], [0, 1])
-            intens_str, coord_str = title.get_text().split(":")
-            title.set_text(intens_str + ":" + coord_str)
-            intensity_canvas.draw_idle()
+            # only every (107/73) = 1.4657 steps do we see a new interpolated image
+            if x % 3 == 0: 
+                position_line.set_data([x/1.4657, x/1.4657], [0, 1])
+                intens_str, coord_str = title.get_text().split(":")
+                title.set_text(intens_str + ":" + coord_str)
+                intensity_canvas.draw_idle()
 
         # connect the function to the dims axis
         viewer.dims.events.current_step.connect(update_plot)
