@@ -78,30 +78,32 @@ def main():
             opacity=0.4,
         )
 
-        # aribitrarily grab red layer
-        intensity_plot_im = viewer.layers["FRE_B2"].data[LEVEL]
+        # take NIR and FRE_B4 for NDVI computation
+        NIR = viewer.layers["FRE_B8"].data[LEVEL]
+        red = viewer.layers["FRE_B4"].data[LEVEL]
+
         # create the intensity plot
         with plt.style.context("dark_background"):
             intensity_canvas = FigureCanvas(Figure(figsize=(5, 3)))
             intensity_axes = intensity_canvas.figure.subplots()
-            intensities = intensity_plot_im[:, 0, 0, 0]
+            ndvi = get_ndvi(NIR, red, 0, 0)
 
             intensity_line = intensity_axes.plot(
-                np.arange(intensity_plot_im.shape[0]), intensities
+                np.arange(NIR.shape[0]), ndvi
             )[
                 0
             ]  # returns line list
             position_line = intensity_axes.axvline(x=0, c="C1")
-            position_line.set_zorder(-1)  # keep the spectra in front
-            minval, maxval = np.min(intensities), np.max(intensities)
+            position_line.set_zorder(-1)  # keep the time point in front
+            minval, maxval = np.min(ndvi), np.max(ndvi)
             range_ = maxval - minval
             centre = (maxval + minval) / 2
             min_y = centre - 1.05 * range_ / 2
             max_y = centre + 1.05 * range_ / 2
             intensity_axes.set_ylim(min_y, max_y)
             intensity_axes.set_xlabel("time")
-            intensity_axes.set_ylabel("intensity")
-            title = intensity_axes.set_title("Intensity at: coord=(0, 0)")
+            intensity_axes.set_ylabel("NDVI")
+            title = intensity_axes.set_title("NDVI at: coord=(0, 0)")
             intensity_canvas.figure.tight_layout()
 
         toolbar = NavigationToolbar2QT(intensity_canvas, viewer.window._qt_window)
@@ -133,23 +135,23 @@ def main():
             coords_full = tuple(np.round(layer.coordinates).astype(int) // 2 ** LEVEL)
 
             in_range = all(
-                coords_full[i] in range(intensity_plot_im.shape[i])
-                for i in range(intensity_plot_im.ndim)
+                coords_full[i] in range(NIR.shape[i])
+                for i in range(NIR.ndim)
             )
             coords = coords_full[-2:]  # rows, columns
             if in_range:
                 print(f"Updating plot for {coords}...")
-                new_ys = intensity_plot_im[:, :, coords[0], coords[1]]
-                min_y = np.min(new_ys)
-                max_y = np.max(new_ys)
-                intensity_axes.set_ylim(min_y, max_y)
+                new_ys = get_ndvi(NIR, red, coords[0], coords[1])
+                # min_y = np.min(new_ys)
+                # max_y = np.max(new_ys)
+                intensity_axes.set_ylim(0, 1)
                 intensity_line.set_data(xs, new_ys)
                 intens_str, coords_str = title.get_text().split(":")
                 title.set_text(intens_str + ": " + str(coords))
                 intensity_canvas.draw_idle()
 
         for layer in viewer.layers:
-            # add a click callback to each layer to update the spectrum being viewed
+            # add a click callback to each layer to update the pixel being plotted
             layer.mouse_drag_callbacks.append(update_intensity)
 
 
@@ -168,5 +170,17 @@ def get_label_properties():
 
     return label_properties, colour_dict
 
+def get_ndvi(NIR, red, y, x):
+    nir_intensities = NIR[:, 0, y, x]
+    red_intensities = red[:, 0, y, x]
 
+    intensity_sum = (nir_intensities + red_intensities)
+    if np.any(intensity_sum == 0):
+        print("Zero in denom")
+    intensity_diff = (nir_intensities - red_intensities)
+
+    ndvi =  np.divide(intensity_diff,intensity_sum)
+    ndvi[np.isnan(ndvi)] = 0
+
+    return ndvi
 main()
