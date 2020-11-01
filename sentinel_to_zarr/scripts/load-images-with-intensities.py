@@ -142,8 +142,6 @@ def main():
             if in_range:
                 print(f"Updating plot for {coords}...")
                 new_ys = get_ndvi(NIR, red, coords[0], coords[1])
-                # min_y = np.min(new_ys)
-                # max_y = np.max(new_ys)
                 intensity_axes.set_ylim(0, 1)
                 intensity_line.set_data(xs, new_ys)
                 intens_str, coords_str = title.get_text().split(":")
@@ -175,12 +173,11 @@ def get_ndvi(NIR, red, y, x):
     red_intensities = red[:, 0, y, x]
 
     intensity_sum = (nir_intensities + red_intensities)
-    if np.any(intensity_sum == 0):
-        print("Zero in denom")
     intensity_diff = (nir_intensities - red_intensities)
 
     ndvi =  np.divide(intensity_diff,intensity_sum)
     ndvi[np.isnan(ndvi)] = 0
 
     return ndvi
+    
 main()
