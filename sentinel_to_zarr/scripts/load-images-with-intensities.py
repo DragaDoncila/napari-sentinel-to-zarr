@@ -132,20 +132,21 @@ def main():
 
         def update_intensity(layer, event):
             xs, ys = intensity_line.get_data()
-            coords_full = tuple(np.round(layer.coordinates).astype(int) // 2 ** LEVEL)
+            coords = np.round(layer.coordinates).astype(int)
+            coords_display = tuple(coords)[-2:]
+            coords_level = tuple(coords // 2 ** LEVEL)
 
             in_range = all(
-                coords_full[i] in range(NIR.shape[i])
+                coords_level[i] in range(NIR.shape[i])
                 for i in range(NIR.ndim)
             )
-            coords = coords_full[-2:]  # rows, columns
             if in_range:
-                print(f"Updating plot for {coords}...")
-                new_ys = get_ndvi(NIR, red, coords[0], coords[1])
+                print(f"Updating plot for {coords_display}...")
+                new_ys = get_ndvi(NIR, red, coords_level[-2], coords_level[-1])
                 intensity_axes.set_ylim(0, 1)
                 intensity_line.set_data(xs, new_ys)
                 intens_str, coords_str = title.get_text().split(":")
-                title.set_text(intens_str + ": " + str(coords))
+                title.set_text(intens_str + ": " + str(coords_display))
                 intensity_canvas.draw_idle()
 
         for layer in viewer.layers:
@@ -179,5 +180,5 @@ def get_ndvi(NIR, red, y, x):
     ndvi[np.isnan(ndvi)] = 0
 
     return ndvi
-    
+
 main()
