@@ -13,7 +13,17 @@ INTERPOLATED_PATH = "/media/draga/Elements/55HBU_GapFilled_Multiscale.zarr"
 LABELS_PATH = "/media/draga/My Passport/55HBU_Multiscale_Labels.zarr"
 LEVEL = 1
 
-USED_LAYERS = ["FRE_B2", "FRE_B3", "FRE_B4", "FRE_B8","Raw_FRE_B2", "Raw_FRE_B3", "Raw_FRE_B4", "Raw_FRE_B8"]
+USED_LAYERS = [
+    "FRE_B2",
+    "FRE_B3",
+    "FRE_B4",
+    "FRE_B8",
+    "Raw_FRE_B2",
+    "Raw_FRE_B3",
+    "Raw_FRE_B4",
+    "Raw_FRE_B8",
+]
+
 
 def main():
     label_properties = {
@@ -60,7 +70,7 @@ def main():
             scale=(365 / 108, 1, 1, 1), 
             visible=False
         )
-        
+
         for layer in viewer.layers:
             layer.name = f"Raw_{layer.name}"
 
@@ -71,7 +81,7 @@ def main():
         )
 
         to_delete = []
-        for i,layer in enumerate(viewer.layers):
+        for i, layer in enumerate(viewer.layers):
             if not layer.name in USED_LAYERS:
                 to_delete.append(i)
         to_delete.reverse()
@@ -80,7 +90,7 @@ def main():
 
         viewer.open(
             LABELS_PATH,
-            scale=(365*2, 1, 1, 1),
+            scale=(365 * 2, 1, 1, 1),
             layer_type="labels",
             properties=label_properties,
             color=colour_dict,
@@ -128,8 +138,8 @@ def main():
                 return
             x = axis_event.value
             # only every (107/73) = 1.4657 steps do we see a new interpolated image
-            if x % 3 == 0: 
-                position_line.set_data([x/1.4657, x/1.4657], [0, 1])
+            if x % 3 == 0:
+                position_line.set_data([x / 1.4657, x / 1.4657], [0, 1])
                 intens_str, coord_str = title.get_text().split(":")
                 title.set_text(intens_str + ":" + coord_str)
                 intensity_canvas.draw_idle()
