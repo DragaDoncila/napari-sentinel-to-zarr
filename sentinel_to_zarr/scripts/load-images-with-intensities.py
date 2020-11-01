@@ -13,6 +13,7 @@ INTERPOLATED_PATH = "/media/draga/Elements/55HBU_GapFilled_Multiscale.zarr"
 LABELS_PATH = "/media/draga/My Passport/55HBU_Multiscale_Labels.zarr"
 LEVEL = 1
 
+USED_CHANNELS = ["FRE_B2", "FRE_B3", "FRE_B4", "FRE_B8"]
 
 def main():
     label_properties = {
@@ -68,6 +69,13 @@ def main():
             scale=(365 / 73, 1, 1, 1),
             multiscale=True,
         )
+
+        used_layers = []
+        for i, layer in enumerate(viewer.layers):
+            if any(channel in layer.name for channel in USED_CHANNELS):
+                used_layers.append(layer)
+        
+        viewer.layers = used_layers
 
         viewer.open(
             LABELS_PATH,
