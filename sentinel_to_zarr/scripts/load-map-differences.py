@@ -25,7 +25,7 @@ label_properties = {
 }
 
 MAP_1_PATH = "/media/draga/My Passport/Map_Differences/55HBU_Map_1.zarr"
-MAP_2_PATH = "/media/draga/My Passport/Map_Differences/55HBU_Map_2.zarr"
+MAP_2_PATH = "/media/draga/Elements/Map_Differences/55HBU_Map_3.zarr"
 MAX_LAYER = 3
 
 def main():
@@ -63,6 +63,7 @@ def main():
         )
         viewer.add_labels(
             difference_layers,
+            name="Difference",
             color=difference_colors
         )
 
