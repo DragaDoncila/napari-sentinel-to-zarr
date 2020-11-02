@@ -191,8 +191,8 @@ def remove_unused_layers(viewer):
         viewer.layers.pop(i)
 
 def get_ndvi(NIR, red, y, x):
-    nir_intensities = np.clip(NIR[:, 0, y, x], 0, np.inf)
-    red_intensities = np.clip(red[:, 0, y, x], 0, np.inf)
+    nir_intensities = NIR[:, 0, y, x].astype(np.float32)
+    red_intensities = red[:, 0, y, x].astype(np.float32)
 
     intensity_sum = (nir_intensities + red_intensities)
     intensity_diff = (nir_intensities - red_intensities)
@@ -205,8 +205,10 @@ def get_ndvi(NIR, red, y, x):
 def get_ndvi_layer(NIR, red):
     ndvi_levels = []
     for i in range(len(NIR)):
-        intensity_sum = da.map_blocks(np.clip, NIR[i] + red[i], 0, np.inf)
-        intensity_diff = da.map_blocks(np.clip, NIR[i] - red[i], 0, np.inf)
+        current_nir = NIR[i].astype(np.float32)
+        current_red = red[i].astype(np.float32)
+        intensity_sum = current_nir + current_red
+        intensity_diff = current_nir - current_red
         ndvi_layer = da.divide(intensity_diff, intensity_sum)
         ndvi_layer = da.nan_to_num(ndvi_layer)
         ndvi_levels.append(ndvi_layer)
