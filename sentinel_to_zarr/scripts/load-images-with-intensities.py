@@ -110,6 +110,7 @@ def main():
         viewer.add_labels(
             label_difference,
             name="Label Difference",
+            scale=(365 * 2, 1, 1, 1),
             color=difference_colors,
             visible=False
         )
@@ -125,8 +126,20 @@ def main():
         )
 
         # take NIR and FRE_B4 for NDVI computation
-        NIR = viewer.layers["FRE_B8"].data[LEVEL]
-        red = viewer.layers["FRE_B4"].data[LEVEL]
+        NIR = viewer.layers["FRE_B8"].data
+        red = viewer.layers["FRE_B4"].data
+
+        ndvi_layer = get_ndvi_layer(NIR, red)
+        viewer.add_image(
+            ndvi_layer,
+            name= "NDVI",
+            scale=(365 / 73, 1, 1, 1),
+            multiscale=True,
+            contrast_limits=(0,1)
+        )
+
+        NIR = NIR[LEVEL]
+        red = red[LEVEL]
 
         # create the intensity plot
         with plt.style.context("dark_background"):
@@ -222,10 +235,20 @@ def get_ndvi(NIR, red, y, x):
     intensity_sum = (nir_intensities + red_intensities)
     intensity_diff = (nir_intensities - red_intensities)
 
-    ndvi =  np.divide(intensity_diff,intensity_sum)
-    ndvi[np.isnan(ndvi)] = 0
+    ndvi =  da.divide(intensity_diff,intensity_sum)
+    ndvi[da.isnan(ndvi)] = 0
 
     return ndvi
+
+def get_ndvi_layer(NIR, red):
+    ndvi_levels = []
+    for i in range(len(NIR)):
+        intensity_sum = NIR[i] + red[i]
+        intensity_diff = NIR[i] - red[i]
+        ndvi_layer = da.divide(intensity_diff, intensity_sum)
+        ndvi_layer = da.nan_to_num(ndvi_layer)
+        ndvi_levels.append(ndvi_layer)
+    return ndvi_levels
 
 def get_label_difference():
     map_1_layers = []
