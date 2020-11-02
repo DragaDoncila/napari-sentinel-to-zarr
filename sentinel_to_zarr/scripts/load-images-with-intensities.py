@@ -8,8 +8,6 @@ import numpy as np
 from PyQt5.QtWidgets import QVBoxLayout, QWidget
 import dask.array as da
 
-LABEL_MAPPING = "./sentinel_to_zarr/class_map.txt"
-
 RAW_PATH = "/media/draga/My Passport/Zarr/55HBU_Raw/10m_Res.zarr"
 INTERPOLATED_PATH = "/media/draga/Elements/55HBU_GapFilled_Multiscale.zarr"
 
@@ -49,23 +47,6 @@ def main():
         ]
     }
 
-    colour_dict = {
-        0: (0, 0, 0, 0),
-        1: (1.0, 0.39215686274509803, 0.39215686274509803),
-        2: (0.0, 0.1568627450980392, 0.7843137254901961),
-        3: (0.5803921568627451, 0.19607843137254902, 0.6470588235294118),
-        4: (0.9921568627450981, 0.6823529411764706, 0.8980392156862745),
-        5: (0.7764705882352941, 0.7686274509803922, 0.8470588235294118),
-        6: (0.19607843137254902, 0.5882352941176471, 0.0),
-        7: (1.0, 1.0, 0.7529411764705882),
-        8: (0.8862745098039215, 0.9529411764705882, 0.6392156862745098),
-        9: (0.5686274509803921, 0.5098039215686274, 0.4117647058823529),
-        10: (1.0, 1.0, 0.0),
-        11: (1.0, 0.8235294117647058, 0.49019607843137253),
-        12: (1.0, 0.5490196078431373, 0.0),
-        13: (0.7450980392156863, 0.9019607843137255, 0.35294117647058826),
-    }
-
     with napari.gui_qt():
         napari.utils.dask_utils.resize_dask_cache(mem_fraction=0.1)
         viewer = napari.Viewer()
@@ -74,7 +55,6 @@ def main():
             scale=(365 / 108, 1, 1, 1), 
             visible=False
         )
-
         for layer in viewer.layers:
             layer.name = f"Raw_{layer.name}"
 
@@ -84,24 +64,7 @@ def main():
             multiscale=True,
         )
 
-        to_delete = []
-        for i, layer in enumerate(viewer.layers):
-            if not layer.name in USED_LAYERS:
-                to_delete.append(i)
-        to_delete.reverse()
-        for i in to_delete:
-            viewer.layers.pop(i)
-
-        viewer.open(
-            ALTERNATE_LABELS_PATH,
-            name="Alternate Labels",
-            scale=(365 * 2, 1, 1, 1),
-            layer_type="labels",
-            properties=label_properties,
-            color=colour_dict,
-            opacity=0.4,
-            visible=False
-        )
+        remove_unused_layers(viewer)
 
         label_difference = get_label_difference()
         difference_colors = {
@@ -116,19 +79,28 @@ def main():
         )
 
         viewer.open(
+            ALTERNATE_LABELS_PATH,
+            name="Alternate Labels",
+            scale=(365 * 2, 1, 1, 1),
+            layer_type="labels",
+            properties=label_properties,
+            opacity=0.4,
+            visible=False
+        )
+
+        viewer.open(
             LABELS_PATH,
             name= "Labels",
             scale=(365 * 2, 1, 1, 1),
             layer_type="labels",
             properties=label_properties,
-            color=colour_dict,
             opacity=0.4,
+            visible=False
         )
 
         # take NIR and FRE_B4 for NDVI computation
         NIR = viewer.layers["FRE_B8"].data
         red = viewer.layers["FRE_B4"].data
-
         ndvi_layer = get_ndvi_layer(NIR, red)
         viewer.add_image(
             ndvi_layer,
@@ -136,7 +108,8 @@ def main():
             scale=(365 / 73, 1, 1, 1),
             multiscale=True,
             contrast_limits=(0,1),
-            colormap="RdYlGn"
+            colormap="RdYlGn",
+            visible=False
         )
 
         NIR = NIR[LEVEL]
@@ -208,25 +181,18 @@ def main():
             # add a click callback to each layer to update the pixel being plotted
             layer.mouse_drag_callbacks.append(update_intensity)
 
-
-def get_label_properties():
-    df = pd.read_csv(LABEL_MAPPING)
-
-    dicts = df.to_dict("split")
-    classes = list(df["class"])
-    colors = [tuple([v / 255 for v in literal_eval(val)]) for val in list(df["colour"])]
-
-    label_properties = {"class": ["None"] + classes}
-
-    colour_indices = [i for i in range(df.shape[0] + 1)]
-    colours = [(0, 0, 0, 0)] + colors
-    colour_dict = dict(zip(colour_indices, colours))
-
-    return label_properties, colour_dict
+def remove_unused_layers(viewer):
+    to_delete = []
+    for i, layer in enumerate(viewer.layers):
+        if not layer.name in USED_LAYERS:
+            to_delete.append(i)
+    to_delete.reverse()
+    for i in to_delete:
+        viewer.layers.pop(i)
 
 def get_ndvi(NIR, red, y, x):
-    nir_intensities = NIR[:, 0, y, x]
-    red_intensities = red[:, 0, y, x]
+    nir_intensities = np.clip(NIR[:, 0, y, x], 0, np.inf)
+    red_intensities = np.clip(red[:, 0, y, x], 0, np.inf)
 
     intensity_sum = (nir_intensities + red_intensities)
     intensity_diff = (nir_intensities - red_intensities)
@@ -239,8 +205,8 @@ def get_ndvi(NIR, red, y, x):
 def get_ndvi_layer(NIR, red):
     ndvi_levels = []
     for i in range(len(NIR)):
-        intensity_sum = NIR[i] + red[i]
-        intensity_diff = NIR[i] - red[i]
+        intensity_sum = da.map_blocks(np.clip, NIR[i] + red[i], 0, np.inf)
+        intensity_diff = da.map_blocks(np.clip, NIR[i] - red[i], 0, np.inf)
         ndvi_layer = da.divide(intensity_diff, intensity_sum)
         ndvi_layer = da.nan_to_num(ndvi_layer)
         ndvi_levels.append(ndvi_layer)
