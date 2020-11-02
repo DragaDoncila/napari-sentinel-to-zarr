@@ -135,7 +135,8 @@ def main():
             name= "NDVI",
             scale=(365 / 73, 1, 1, 1),
             multiscale=True,
-            contrast_limits=(-1,1)
+            contrast_limits=(0,1),
+            colormap="RdYlGn"
         )
 
         NIR = NIR[LEVEL]
