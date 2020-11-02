@@ -6,11 +6,15 @@ from matplotlib.backends.backend_qt5agg import FigureCanvas, NavigationToolbar2Q
 from matplotlib.figure import Figure
 import numpy as np
 from PyQt5.QtWidgets import QVBoxLayout, QWidget
+import dask.array as da
 
 LABEL_MAPPING = "./sentinel_to_zarr/class_map.txt"
+
 RAW_PATH = "/media/draga/My Passport/Zarr/55HBU_Raw/10m_Res.zarr"
 INTERPOLATED_PATH = "/media/draga/Elements/55HBU_GapFilled_Multiscale.zarr"
+
 LABELS_PATH = "/media/draga/My Passport/55HBU_Multiscale_Labels.zarr"
+ALTERNATE_LABELS_PATH = "/media/draga/Elements/Map_Differences/55HBU_Alternate_Map.zarr"
 LEVEL = 1
 
 USED_LAYERS = [
@@ -89,7 +93,30 @@ def main():
             viewer.layers.pop(i)
 
         viewer.open(
+            ALTERNATE_LABELS_PATH,
+            name="Alternate Labels",
+            scale=(365 * 2, 1, 1, 1),
+            layer_type="labels",
+            properties=label_properties,
+            color=colour_dict,
+            opacity=0.4,
+            visible=False
+        )
+
+        label_difference = get_label_difference()
+        difference_colors = {
+            1: "white"
+        }
+        viewer.add_labels(
+            label_difference,
+            name="Label Difference",
+            color=difference_colors,
+            visible=False
+        )
+
+        viewer.open(
             LABELS_PATH,
+            name= "Labels",
             scale=(365 * 2, 1, 1, 1),
             layer_type="labels",
             properties=label_properties,
@@ -199,5 +226,23 @@ def get_ndvi(NIR, red, y, x):
     ndvi[np.isnan(ndvi)] = 0
 
     return ndvi
+
+def get_label_difference():
+    map_1_layers = []
+    map_2_layers = []
+    for i in range(4):
+        map_1_layer = da.from_zarr(LABELS_PATH + f"/{i}")
+        map_2_layer = da.from_zarr(ALTERNATE_LABELS_PATH + f"/{i}")
+
+        map_1_layers.append(map_1_layer)
+        map_2_layers.append(map_2_layer)
+
+    difference_layers = []
+    for map_1_layer, map_2_layer in zip(map_1_layers, map_2_layers):
+        difference = map_2_layer - map_1_layer
+        difference_binary = np.where(difference != 0, 1, 0)
+        difference_layers.append(difference_binary)
+
+    return difference_layers   
 
 main()
