@@ -1,5 +1,3 @@
-import pandas as pd
-from ast import literal_eval
 import napari
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_qt5agg import FigureCanvas, NavigationToolbar2QT
@@ -7,8 +5,6 @@ from matplotlib.figure import Figure
 import numpy as np
 from PyQt5.QtWidgets import QVBoxLayout, QWidget
 import dask.array as da
-
-LABEL_MAPPING = "./sentinel_to_zarr/class_map.txt"
 
 RAW_PATH = "/media/draga/My Passport/Zarr/55HBU_Raw/10m_Res.zarr"
 INTERPOLATED_PATH = "/media/draga/Elements/55HBU_GapFilled_Multiscale.zarr"
@@ -49,63 +45,33 @@ def main():
         ]
     }
 
-    colour_dict = {
-        0: (0, 0, 0, 0),
-        1: (1.0, 0.39215686274509803, 0.39215686274509803),
-        2: (0.0, 0.1568627450980392, 0.7843137254901961),
-        3: (0.5803921568627451, 0.19607843137254902, 0.6470588235294118),
-        4: (0.9921568627450981, 0.6823529411764706, 0.8980392156862745),
-        5: (0.7764705882352941, 0.7686274509803922, 0.8470588235294118),
-        6: (0.19607843137254902, 0.5882352941176471, 0.0),
-        7: (1.0, 1.0, 0.7529411764705882),
-        8: (0.8862745098039215, 0.9529411764705882, 0.6392156862745098),
-        9: (0.5686274509803921, 0.5098039215686274, 0.4117647058823529),
-        10: (1.0, 1.0, 0.0),
-        11: (1.0, 0.8235294117647058, 0.49019607843137253),
-        12: (1.0, 0.5490196078431373, 0.0),
-        13: (0.7450980392156863, 0.9019607843137255, 0.35294117647058826),
-    }
-
     with napari.gui_qt():
         napari.utils.dask_utils.resize_dask_cache(mem_fraction=0.1)
+
+        # load raw images and prepend Raw onto their name
         viewer = napari.Viewer()
         viewer.open(
             RAW_PATH, 
             scale=(365 / 108, 1, 1, 1), 
             visible=False
         )
-
         for layer in viewer.layers:
             layer.name = f"Raw_{layer.name}"
 
+        # load interpolated images 
         viewer.open(
             INTERPOLATED_PATH,
             scale=(365 / 73, 1, 1, 1),
             multiscale=True,
         )
 
-        to_delete = []
-        for i, layer in enumerate(viewer.layers):
-            if not layer.name in USED_LAYERS:
-                to_delete.append(i)
-        to_delete.reverse()
-        for i in to_delete:
-            viewer.layers.pop(i)
+        # just keep the layers in the list to mitigate clutter
+        remove_unused_layers(viewer)
 
-        viewer.open(
-            ALTERNATE_LABELS_PATH,
-            name="Alternate Labels",
-            scale=(365 * 2, 1, 1, 1),
-            layer_type="labels",
-            properties=label_properties,
-            color=colour_dict,
-            opacity=0.4,
-            visible=False
-        )
-
+        # compute difference between two labels layers and display
         label_difference = get_label_difference()
         difference_colors = {
-            1: "white"
+            1: "white"  # still not great contrast...
         }
         viewer.add_labels(
             label_difference,
@@ -115,20 +81,29 @@ def main():
             visible=False
         )
 
+        # add the two label images
+        viewer.open(
+            ALTERNATE_LABELS_PATH,
+            name="Alternate Labels",
+            scale=(365 * 2, 1, 1, 1),
+            layer_type="labels",
+            properties=label_properties,
+            opacity=0.4,
+            visible=False
+        )
         viewer.open(
             LABELS_PATH,
             name= "Labels",
             scale=(365 * 2, 1, 1, 1),
             layer_type="labels",
             properties=label_properties,
-            color=colour_dict,
             opacity=0.4,
+            visible=False
         )
 
-        # take NIR and FRE_B4 for NDVI computation
+        # add NDVI layer
         NIR = viewer.layers["FRE_B8"].data
         red = viewer.layers["FRE_B4"].data
-
         ndvi_layer = get_ndvi_layer(NIR, red)
         viewer.add_image(
             ndvi_layer,
@@ -136,41 +111,48 @@ def main():
             scale=(365 / 73, 1, 1, 1),
             multiscale=True,
             contrast_limits=(0,1),
-            colormap="RdYlGn"
+            colormap="RdYlGn",
+            visible=False
         )
 
         NIR = NIR[LEVEL]
         red = red[LEVEL]
-
-        # create the intensity plot
+        # create the NDVI plot
         with plt.style.context("dark_background"):
-            intensity_canvas = FigureCanvas(Figure(figsize=(5, 3)))
-            intensity_axes = intensity_canvas.figure.subplots()
+            ndvi_canvas = FigureCanvas(Figure(figsize=(5, 3)))
+            ndvi_axes = ndvi_canvas.figure.subplots()
             ndvi = get_ndvi(NIR, red, 0, 0)
 
-            intensity_line = intensity_axes.plot(
+            ndvi_line = ndvi_axes.plot(
                 np.arange(NIR.shape[0]), ndvi
             )[
                 0
             ]  # returns line list
-            position_line = intensity_axes.axvline(x=0, c="C1")
+            position_line = ndvi_axes.axvline(x=0, c="C1")
             position_line.set_zorder(-1)  # keep the time point in front
-            intensity_axes.set_ylim(-1, 1)
-            intensity_axes.set_xlabel("time")
-            intensity_axes.set_ylabel("NDVI")
-            title = intensity_axes.set_title("NDVI at: coord=(0, 0)")
-            intensity_canvas.figure.tight_layout()
+            # set y limits
+            minval, maxval = np.min(ndvi), np.max(ndvi)
+            range_ = maxval - minval
+            centre = (maxval + minval) / 2
+            min_y = centre - 1.05 * range_ / 2
+            max_y = centre + 1.05 * range_ / 2
+            ndvi_axes.set_ylim(min_y, max_y)
+            ndvi_axes.set_xlabel("time")
+            ndvi_axes.set_ylabel("NDVI")
+            title = ndvi_axes.set_title("NDVI at: coord=(0, 0)")
+            ndvi_canvas.figure.tight_layout()
 
-        toolbar = NavigationToolbar2QT(intensity_canvas, viewer.window._qt_window)
+        # add matplotlib toolbar
+        toolbar = NavigationToolbar2QT(ndvi_canvas, viewer.window._qt_window)
         widget = QWidget()
         layout = QVBoxLayout()
         widget.setLayout(layout)
         layout.addWidget(toolbar)
-        layout.addWidget(intensity_canvas)
+        layout.addWidget(ndvi_canvas)
         viewer.window.add_dock_widget(widget)
 
         # create a function to update the vertical bar corresponding to timepoint
-        def update_plot(axis_event):
+        def update_timepoint(axis_event):
             axis = axis_event.axis
             if axis != 1:
                 return
@@ -180,13 +162,13 @@ def main():
                 position_line.set_data([x / 1.4657, x / 1.4657], [0, 1])
                 intens_str, coord_str = title.get_text().split(":")
                 title.set_text(intens_str + ":" + coord_str)
-                intensity_canvas.draw_idle()
+                ndvi_canvas.draw_idle()
 
         # connect the function to the dims axis
-        viewer.dims.events.current_step.connect(update_plot)
+        viewer.dims.events.current_step.connect(update_timepoint)
 
-        def update_intensity(layer, event):
-            xs, ys = intensity_line.get_data()
+        def update_ndvi(layer, event):
+            xs, ys = ndvi_line.get_data()
             coords = np.round(layer.coordinates).astype(int)
             coords_display = tuple(coords)[-2:]
             coords_level = tuple(coords // 2 ** LEVEL)
@@ -198,35 +180,36 @@ def main():
             if in_range:
                 print(f"Updating plot for {coords_display}...")
                 new_ys = get_ndvi(NIR, red, coords_level[-2], coords_level[-1])
-                intensity_axes.set_ylim(-1, 1)
-                intensity_line.set_data(xs, new_ys)
+                # set y limits
+                minval, maxval = np.min(new_ys), np.max(new_ys)
+                range_ = maxval - minval
+                centre = (maxval + minval) / 2
+                min_y = centre - 1.05 * range_ / 2
+                max_y = centre + 1.05 * range_ / 2
+                ndvi_axes.set_ylim(min_y, max_y)
+                ndvi_line.set_data(xs, new_ys)
                 intens_str, coords_str = title.get_text().split(":")
                 title.set_text(intens_str + ": " + str(coords_display))
-                intensity_canvas.draw_idle()
+                ndvi_canvas.draw_idle()
 
         for layer in viewer.layers:
             # add a click callback to each layer to update the pixel being plotted
-            layer.mouse_drag_callbacks.append(update_intensity)
+            layer.mouse_drag_callbacks.append(update_ndvi)
 
-
-def get_label_properties():
-    df = pd.read_csv(LABEL_MAPPING)
-
-    dicts = df.to_dict("split")
-    classes = list(df["class"])
-    colors = [tuple([v / 255 for v in literal_eval(val)]) for val in list(df["colour"])]
-
-    label_properties = {"class": ["None"] + classes}
-
-    colour_indices = [i for i in range(df.shape[0] + 1)]
-    colours = [(0, 0, 0, 0)] + colors
-    colour_dict = dict(zip(colour_indices, colours))
-
-    return label_properties, colour_dict
+def remove_unused_layers(viewer):
+    """Delete any layers not in the USED_LAYERS list"""
+    to_delete = []
+    for i, layer in enumerate(viewer.layers):
+        if not layer.name in USED_LAYERS:
+            to_delete.append(i)
+    to_delete.reverse()
+    for i in to_delete:
+        viewer.layers.pop(i)
 
 def get_ndvi(NIR, red, y, x):
-    nir_intensities = NIR[:, 0, y, x]
-    red_intensities = red[:, 0, y, x]
+    """Get NDVI of a particular pixel"""
+    nir_intensities = NIR[:, 0, y, x].astype(np.float32)
+    red_intensities = red[:, 0, y, x].astype(np.float32)
 
     intensity_sum = (nir_intensities + red_intensities)
     intensity_diff = (nir_intensities - red_intensities)
@@ -237,16 +220,20 @@ def get_ndvi(NIR, red, y, x):
     return ndvi
 
 def get_ndvi_layer(NIR, red):
+    """Get multiscale NDVI layer for display"""
     ndvi_levels = []
     for i in range(len(NIR)):
-        intensity_sum = NIR[i] + red[i]
-        intensity_diff = NIR[i] - red[i]
+        current_nir = NIR[i].astype(np.float32)
+        current_red = red[i].astype(np.float32)
+        intensity_sum = current_nir + current_red
+        intensity_diff = current_nir - current_red
         ndvi_layer = da.divide(intensity_diff, intensity_sum)
         ndvi_layer = da.nan_to_num(ndvi_layer)
         ndvi_levels.append(ndvi_layer)
     return ndvi_levels
 
 def get_label_difference():
+    """Get multiscale label difference between two maps"""
     map_1_layers = []
     map_2_layers = []
     for i in range(4):
