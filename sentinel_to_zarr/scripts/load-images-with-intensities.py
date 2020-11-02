@@ -135,7 +135,7 @@ def main():
             name= "NDVI",
             scale=(365 / 73, 1, 1, 1),
             multiscale=True,
-            contrast_limits=(0,1)
+            contrast_limits=(-1,1)
         )
 
         NIR = NIR[LEVEL]
@@ -154,12 +154,7 @@ def main():
             ]  # returns line list
             position_line = intensity_axes.axvline(x=0, c="C1")
             position_line.set_zorder(-1)  # keep the time point in front
-            minval, maxval = np.min(ndvi), np.max(ndvi)
-            range_ = maxval - minval
-            centre = (maxval + minval) / 2
-            min_y = centre - 1.05 * range_ / 2
-            max_y = centre + 1.05 * range_ / 2
-            intensity_axes.set_ylim(min_y, max_y)
+            intensity_axes.set_ylim(-1, 1)
             intensity_axes.set_xlabel("time")
             intensity_axes.set_ylabel("NDVI")
             title = intensity_axes.set_title("NDVI at: coord=(0, 0)")
@@ -202,7 +197,7 @@ def main():
             if in_range:
                 print(f"Updating plot for {coords_display}...")
                 new_ys = get_ndvi(NIR, red, coords_level[-2], coords_level[-1])
-                intensity_axes.set_ylim(0, 1)
+                intensity_axes.set_ylim(-1, 1)
                 intensity_line.set_data(xs, new_ys)
                 intens_str, coords_str = title.get_text().split(":")
                 title.set_text(intens_str + ": " + str(coords_display))
